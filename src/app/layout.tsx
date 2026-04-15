@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Why Not Preloved — POS System",
-  description: "Sistem POS untuk event preloved Why Not Preloved.",
+  description: "Sistem POS khusus event preloved Why Not Preloved.",
   manifest: "/manifest.json",
   themeColor: "#7c3aed",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "WNP POS" },

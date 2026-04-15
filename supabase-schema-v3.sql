@@ -1,5 +1,5 @@
 -- ============================================================
--- WHY NOT PRELOVED POS v3 — Full Schema (Fresh)
+-- WHY NOT PRELOVED POS v3 â€” Full Schema (Fresh)
 -- Run in Supabase SQL Editor
 -- ============================================================
 
@@ -189,7 +189,7 @@ CREATE INDEX idx_audit_ts ON audit_logs(timestamp DESC);
 CREATE INDEX idx_audit_action ON audit_logs(action);
 
 -- ============================================================
--- RLS — Open for MVP
+-- RLS â€” Open for MVP
 -- ============================================================
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
@@ -226,12 +226,12 @@ INSERT INTO users (username, pin, name, role) VALUES
   ('kasir1', '1234', 'Kasir 1', 'kasir'),
   ('kasir2', '1234', 'Kasir 2', 'kasir');
 
-INSERT INTO app_settings (key, value) VALUES
-  ('void_key', 'WNP2026');
-
 INSERT INTO vendors (code, name, commission_rate_percentage, bank_account) VALUES
   ('WNP', 'Why Not Preloved (Sendiri)', 0, '-'),
   ('VDRA', 'Vendor A', 20, 'BCA 1234567890');
+
+INSERT INTO app_settings (key, value) VALUES
+  ('void_key', 'WNP2026');
 
 INSERT INTO events (name, location, start_date, end_date, is_active, created_by)
 SELECT 'Penjualan Harian', 'Toko', '2026-01-01', NULL, true, id FROM users WHERE username='owner';

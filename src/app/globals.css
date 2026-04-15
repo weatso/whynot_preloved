@@ -11,36 +11,18 @@
   --color-brand-green-dark: #059669;
   --color-brand-red: #ef4444;
   --color-brand-red-dark: #dc2626;
-  --color-brand-yellow: #f59e0b;
-  --color-brand-orange: #f97316;
   --color-brand-text: #f1f5f9;
   --color-brand-muted: #64748b;
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
   --radius-xl: 1rem;
   --radius-2xl: 1.5rem;
-  --radius-3xl: 2rem;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; background-color: var(--color-brand-bg); color: var(--color-brand-text); font-family: var(--font-display); -webkit-font-smoothing: antialiased; }
 body { overflow-y: scroll; }
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: var(--color-brand-surface); }
-::-webkit-scrollbar-thumb { background: var(--color-brand-border); border-radius: 2px; }
 input, select, textarea, button { font-family: inherit; }
 
 @keyframes metric-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.7; transform:scale(1.02); } }
 .metric-updated { animation: metric-pulse 0.5s ease-in-out; }
-@keyframes glow-pulse { 0%,100% { box-shadow:0 0 8px rgba(124,58,237,0.3); } 50% { box-shadow:0 0 24px rgba(124,58,237,0.7); } }
-.glow-active { animation: glow-pulse 2s ease-in-out infinite; }
-@keyframes glow-red { 0%,100% { box-shadow:0 0 8px rgba(239,68,68,0.3); } 50% { box-shadow:0 0 24px rgba(239,68,68,0.7); } }
-.glow-red { animation: glow-red 1.5s ease-in-out infinite; }
-@keyframes slide-in-top { from { transform:translateY(-10px); opacity:0; } to { transform:translateY(0); opacity:1; } }
-.slide-in { animation: slide-in-top 0.2s ease-out forwards; }
-@keyframes fade-in { from { opacity:0; } to { opacity:1; } }
-.fade-in { animation: fade-in 0.15s ease-out forwards; }
-@keyframes log-enter { from { transform:translateX(-20px); opacity:0; } to { transform:translateX(0); opacity:1; } }
-.log-enter { animation: log-enter 0.3s ease-out forwards; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin 1s linear infinite; }

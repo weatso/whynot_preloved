@@ -15,11 +15,9 @@ interface AuthStore {
   login: (username: string, pin: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   canAccess: (page: string) => boolean;
-  verifyVoidKey: (key: string) => Promise<boolean>;
 }
 
 const OWNER_PAGES = ["settlement", "audit", "generate", "events", "vendors", "discounts", "settings"];
-const ADMIN_PAGES = ["users", "stock"];
 
 export const useAuthStore = create<AuthStore>()(
   persist(
@@ -59,17 +57,7 @@ export const useAuthStore = create<AuthStore>()(
         if (user.role === "admin") {
           return !OWNER_PAGES.includes(page);
         }
-        // kasir can only access kasir page
         return page === "kasir";
-      },
-
-      verifyVoidKey: async (key: string) => {
-        const { data } = await supabase
-          .from("app_settings")
-          .select("value")
-          .eq("key", "void_key")
-          .single();
-        return data?.value === key;
       },
     }),
     {
@@ -78,10 +66,3 @@ export const useAuthStore = create<AuthStore>()(
     }
   )
 );
-
-export function canRole(role: UserRole | undefined, requiredPages: string[]): boolean {
-  if (!role) return false;
-  if (role === "owner") return true;
-  if (role === "admin") return !requiredPages.some(p => OWNER_PAGES.includes(p));
-  return false;
-}
