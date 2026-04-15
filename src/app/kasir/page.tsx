@@ -14,7 +14,6 @@ export default function KasirPage() {
   const [activeEvents, setActiveEvents] = useState<{ id: string; name: string }[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   
-  // State Search & Modals
   const [inputValue, setInputValue] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [discountInput, setDiscountInput] = useState("");
@@ -45,7 +44,6 @@ export default function KasirPage() {
     if (data) setActiveEvents(data);
   };
 
-  // LIVE SEARCH ENGINE (Bekerja 100% Offline via Cache)
   const handleSearchChange = (val: string) => {
     setInputValue(val);
     if (val.trim().length === 0) {
@@ -55,8 +53,8 @@ export default function KasirPage() {
     const query = val.toLowerCase();
     const results = cachedItems.filter(i => 
       i.status === "available" && 
-      (i.id.toLowerCase().includes(query) || i.name.toLowerCase().includes(query) || i.category.toLowerCase().includes(query))
-    ).slice(0, 8); // Batasi 8 item agar UI tidak tumpah
+      (i.id.toLowerCase().includes(query) || i.name.toLowerCase().includes(query) || i.category.toLowerCase().includes(query) || (i.barcode && i.barcode.toLowerCase().includes(query)))
+    ).slice(0, 8); 
     setSearchResults(results);
   };
 
@@ -72,7 +70,7 @@ export default function KasirPage() {
       return;
     }
 
-    let item = cachedItems.find((i) => i.id === id);
+    let item = cachedItems.find((i) => i.id === id || i.barcode === id);
     if (!item) {
       try {
         const { data } = await supabase.from("items").select("*").eq("id", id).single();
@@ -81,11 +79,11 @@ export default function KasirPage() {
     }
 
     if (!item) {
-      setScanMessage({ text: `❌ Barang ${id} tidak ditemukan`, type: "error" });
+      setScanMessage({ text: `❌ Barang tidak ditemukan`, type: "error" });
       return;
     }
     if (item.status !== "available") {
-      setScanMessage({ text: `❌ ${item.name} sudah terjual`, type: "error" });
+      setScanMessage({ text: `❌ ${item.name} sudah terjual / di keranjang lain`, type: "error" });
       return;
     }
 
@@ -102,7 +100,7 @@ export default function KasirPage() {
       vendorId: item.vendor_id
     });
     
-    supabase.from("items").update({ status: "in_cart" }).eq("id", id).then();
+    supabase.from("items").update({ status: "in_cart" }).eq("id", item.id).then();
     setScanMessage({ text: `✓ ${item.name} ditambahkan`, type: "success" });
     setTimeout(() => setScanMessage(null), 2000);
   }, [items, cachedItems, addItem, user]);
@@ -118,7 +116,6 @@ export default function KasirPage() {
     if (isProcessing || !user || !selectedPayment) return;
     setIsProcessing(true);
 
-    // Kirim waNumber, sistem store.ts akan otomatis Upsert Customer untuk cegah bug pending
     const { success, offline } = await submitTransaction(selectedPayment, user.name, user.id, waNumber.trim() || null);
 
     setIsModalOpen(false);
@@ -126,7 +123,7 @@ export default function KasirPage() {
     setWaNumber("");
     setIsProcessing(false);
 
-    if (offline) alert("⚠️ Offline: Transaksi disimpan & akan disinkronisasi otomatis saat internet kembali.");
+    if (offline) alert("⚠️ Offline: Transaksi disimpan & akan disinkronisasi otomatis.");
     else setScanMessage({ text: `✅ Transaksi berhasil!`, type: "success" });
     
     setTimeout(() => setScanMessage(null), 3000);
@@ -136,11 +133,9 @@ export default function KasirPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--color-brand-bg)", display: "flex", flexDirection: "column" }}>
-      {/* HEADER */}
       <header style={{ background: "var(--color-brand-surface)", borderBottom: "1px solid var(--color-brand-border)", padding: "1rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ fontWeight: "700", color: "var(--color-brand-text)", fontSize: "1.2rem" }}>🏷️ WNP POS</span>
         
-        {/* EVENT SELECTOR */}
         <select 
           value={eventSession?.eventId || "daily"}
           onChange={(e) => {
@@ -162,7 +157,6 @@ export default function KasirPage() {
 
       <div style={{ flex: 1, display: "flex", padding: "1rem", gap: "1rem", overflow: "hidden" }}>
         
-        {/* KIRI: AREA SCAN & SEARCH */}
         <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div style={{ background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: `2px solid ${scanMessage?.type === "error" ? "var(--color-brand-red)" : scanMessage?.type === "success" ? "var(--color-brand-green)" : "var(--color-brand-accent)"}`, position: "relative" }}>
             <p style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem", textTransform: "uppercase", marginBottom: "0.5rem", fontWeight: "bold" }}>Cari Nama / Scan Barcode</p>
@@ -177,7 +171,6 @@ export default function KasirPage() {
               <button onClick={() => handleScan(inputValue)} style={{ background: "var(--color-brand-accent)", color: "white", border: "none", padding: "0.8rem 1.5rem", borderRadius: "8px", fontWeight: "bold", cursor: "pointer" }}>Tambah</button>
             </div>
             
-            {/* DROPDOWN SEARCH RESULT */}
             {searchResults.length > 0 && (
               <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "var(--color-brand-surface)", border: "1px solid var(--color-brand-border)", borderRadius: "0 0 12px 12px", zIndex: 50, maxHeight: "300px", overflowY: "auto", boxShadow: "0 10px 30px rgba(0,0,0,0.5)" }}>
                 {searchResults.map(res => (
@@ -195,7 +188,6 @@ export default function KasirPage() {
             {scanMessage && <p style={{ color: scanMessage.type === "error" ? "var(--color-brand-red)" : "var(--color-brand-green)", marginTop: "0.5rem", fontWeight: "bold" }}>{scanMessage.text}</p>}
           </div>
 
-          {/* KERANJANG */}
           <div style={{ flex: 1, background: "var(--color-brand-card)", borderRadius: "var(--radius-xl)", overflowY: "auto", border: "1px solid var(--color-brand-border)" }}>
             {items.length === 0 ? (
               <div style={{ display: "flex", height: "100%", alignItems: "center", justifyContent: "center", color: "var(--color-brand-muted)" }}>Keranjang Kosong</div>
@@ -214,7 +206,6 @@ export default function KasirPage() {
           </div>
         </div>
 
-        {/* KANAN: AREA BAYAR */}
         <div style={{ flex: 1, background: "var(--color-brand-card)", borderRadius: "var(--radius-xl)", padding: "1.5rem", border: "1px solid var(--color-brand-border)", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
           <div>
             <h2 style={{ color: "var(--color-brand-muted)", textTransform: "uppercase", fontSize: "0.9rem", marginBottom: "1.5rem" }}>Ringkasan</h2>
@@ -241,19 +232,31 @@ export default function KasirPage() {
               )}
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", color: "var(--color-brand-accent-light)", fontSize: "1.5rem", fontWeight: "bold", borderTop: "1px solid var(--color-brand-border)", paddingTop: "1rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", color: "var(--color-brand-accent-light)", fontSize: "1.5rem", fontWeight: "bold", borderTop: "1px solid var(--color-brand-border)", paddingTop: "1rem", marginBottom: "1rem" }}>
               <span>TOTAL</span>
               <span>Rp {grandTotal.toLocaleString("id-ID")}</span>
             </div>
           </div>
 
-          <button disabled={items.length === 0} onClick={() => setIsModalOpen(true)} style={{ width: "100%", padding: "1.5rem", borderRadius: "12px", background: items.length === 0 ? "var(--color-brand-surface)" : "var(--color-brand-green-dark)", color: "white", fontSize: "1.5rem", fontWeight: "bold", border: "none", cursor: items.length === 0 ? "not-allowed" : "pointer" }}>
-            BAYAR
-          </button>
+          <div>
+            <button 
+              onClick={() => {
+                if (window.confirm("🚨 Kosongkan semua barang di keranjang?")) {
+                  clearCart(user.name, user.id);
+                }
+              }}
+              disabled={items.length === 0}
+              style={{ width: "100%", padding: "1rem", background: "transparent", color: "var(--color-brand-red)", border: "1px solid var(--color-brand-red)", borderRadius: "12px", fontWeight: "bold", fontSize: "1rem", cursor: items.length === 0 ? "not-allowed" : "pointer", marginBottom: "1rem" }}>
+              🗑️ KOSONGKAN KERANJANG
+            </button>
+
+            <button disabled={items.length === 0} onClick={() => setIsModalOpen(true)} style={{ width: "100%", padding: "1.5rem", borderRadius: "12px", background: items.length === 0 ? "var(--color-brand-surface)" : "var(--color-brand-green-dark)", color: "white", fontSize: "1.5rem", fontWeight: "bold", border: "none", cursor: items.length === 0 ? "not-allowed" : "pointer" }}>
+              BAYAR
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* MODAL BAYAR */}
       {isModalOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "var(--color-brand-card)", padding: "2.5rem", borderRadius: "var(--radius-2xl)", width: "100%", maxWidth: "450px", textAlign: "center", border: "1px solid var(--color-brand-border)" }}>

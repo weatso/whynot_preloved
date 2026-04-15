@@ -1,123 +1,180 @@
 ﻿"use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/lib/authStore";
-import { generateSettlementReport, exportSettlementCsv } from "@/lib/settlement";
-import { formatRupiah } from "@/lib/skuGenerator";
-import type { SettlementReport } from "@/lib/settlement";
+import { useRouter } from "next/navigation";
 
 export default function SettlementPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [report, setReport] = useState<SettlementReport|null>(null);
+  const [events, setEvents] = useState<any[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [loading, setLoading] = useState(false);
+  
+  const [summary, setSummary] = useState<any>(null);
+  const [vendorPayouts, setVendorPayouts] = useState<any[]>([]);
 
-  useEffect(() => { if (!user) router.replace("/login"); else if (user.role !== "owner") router.replace("/kasir"); }, [user, router]);
+  useEffect(() => {
+    if (!user || user.role !== "owner") router.replace("/login");
+    else fetchEvents();
+  }, [user, router]);
 
-  const handleGenerate = async () => {
+  const fetchEvents = async () => {
+    const { data } = await supabase.from("events").select("id, name, is_closed").order("created_at", { ascending: false });
+    if (data) setEvents(data);
+  };
+
+  const generateReport = async () => {
+    if (!selectedEventId) return alert("Pilih event terlebih dahulu");
     setLoading(true);
-    const r = await generateSettlementReport(date);
-    setReport(r);
+
+    // Hapus filter .eq("status", "completed") yang menyebabkan crash
+    const { data: txns, error } = await supabase
+      .from("transactions")
+      .select(`
+        id, total_amount, discount_applied, payment_method,
+        transaction_items (
+          price_at_sale, discount_applied, discount_bearer,
+          items ( vendor_id, price, vendors ( id, name, commission_rate_percentage ) )
+        )
+      `)
+      .eq("event_id", selectedEventId);
+
+    if (error || !txns) {
+      alert("Gagal menarik data");
+      setLoading(false);
+      return;
+    }
+
+    let gross = 0;
+    let totalDiscount = 0;
+    let cashVolume = 0;
+    let qrisVolume = 0;
+    let vendorMap: Record<string, { name: string; gross_sales: number; commission_cut: number; net_payout: number; items_sold: number }> = {};
+
+    txns.forEach((txn: any) => {
+      gross += Number(txn.total_amount);
+      totalDiscount += Number(txn.discount_applied);
+      if (txn.payment_method === "CASH") cashVolume += Number(txn.total_amount);
+      else qrisVolume += Number(txn.total_amount);
+
+      txn.transaction_items.forEach((ti: any) => {
+        const item = ti.items;
+        const vendor = item.vendors;
+        if (!vendor) return; 
+
+        const vendorId = vendor.id;
+        const salePrice = Number(ti.price_at_sale);
+        
+        const commissionRate = Number(vendor.commission_rate_percentage) / 100;
+        const commissionCut = salePrice * commissionRate;
+        const netPayout = salePrice - commissionCut;
+
+        if (!vendorMap[vendorId]) {
+          vendorMap[vendorId] = { name: vendor.name, gross_sales: 0, commission_cut: 0, net_payout: 0, items_sold: 0 };
+        }
+        
+        vendorMap[vendorId].gross_sales += salePrice;
+        vendorMap[vendorId].commission_cut += commissionCut;
+        vendorMap[vendorId].net_payout += netPayout;
+        vendorMap[vendorId].items_sold += 1;
+      });
+    });
+
+    const payoutsArray = Object.values(vendorMap).sort((a, b) => b.net_payout - a.net_payout);
+    const totalVendorPayout = payoutsArray.reduce((sum, v) => sum + v.net_payout, 0);
+    const vynaleeNetRevenue = gross - totalVendorPayout;
+
+    setSummary({ gross, totalDiscount, cashVolume, qrisVolume, totalVendorPayout, vynaleeNetRevenue });
+    setVendorPayouts(payoutsArray);
     setLoading(false);
   };
 
-  const handleExportCsv = () => {
-    if (!report) return;
-    const csv = exportSettlementCsv(report);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `settlement-vynalee-${date}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  if (!user || user.role !== "owner") return null;
+  if (!user) return null;
 
   return (
-    <>
-      <style>{`@media print { .no-print { display:none !important; } }`}</style>
-      <div style={{ minHeight:"100vh", background:"var(--color-brand-bg)", fontFamily:"var(--font-display)" }}>
-        <header className="no-print" style={{ background:"var(--color-brand-surface)", borderBottom:"1px solid var(--color-brand-border)", padding:"0.875rem 1.5rem", display:"flex", alignItems:"center", gap:"0.75rem" }}>
-          <button id="btn-back-settlement" onClick={() => router.push("/owner")} style={{ background:"transparent", border:"1px solid var(--color-brand-border)", borderRadius:"8px", padding:"5px 12px", color:"var(--color-brand-muted)", cursor:"pointer", fontSize:"0.8rem", fontFamily:"var(--font-display)" }}>← Dashboard</button>
-          <span style={{ fontSize:"1.25rem" }}>📄</span>
-          <span style={{ fontWeight:"700", color:"var(--color-brand-text)" }}>Auto-Settlement Engine</span>
-        </header>
-        <div style={{ maxWidth:"900px", margin:"0 auto", padding:"2rem 1.5rem" }}>
-          <div className="no-print" style={{ background:"var(--color-brand-card)", border:"1px solid var(--color-brand-border)", borderRadius:"var(--radius-xl)", padding:"2rem", marginBottom:"1.5rem" }}>
-            <h1 style={{ fontSize:"1.2rem", fontWeight:"700", marginBottom:"0.4rem" }}>Generate Laporan Settlement</h1>
-            <p style={{ color:"var(--color-brand-muted)", fontSize:"0.875rem", marginBottom:"1.5rem" }}>Sistem otomatis membelah pendapatan berdasarkan komisi vendor yang dikonfigurasi.</p>
-            <div style={{ display:"flex", gap:"1rem", alignItems:"flex-end" }}>
-              <div style={{ flex:1 }}>
-                <label htmlFor="settlement-date" style={{ display:"block", fontSize:"0.75rem", color:"var(--color-brand-muted)", textTransform:"uppercase" as const, letterSpacing:"0.08em", fontWeight:"600", marginBottom:"0.4rem" }}>Tanggal Event</label>
-                <input id="settlement-date" type="date" value={date} onChange={e => setDate(e.target.value)}
-                  style={{ width:"100%", background:"var(--color-brand-surface)", border:"1px solid var(--color-brand-border)", borderRadius:"10px", padding:"0.75rem 0.875rem", color:"var(--color-brand-text)", fontSize:"1rem", fontFamily:"var(--font-display)", outline:"none" }}/>
+    <div style={{ padding: "2rem", background: "var(--color-brand-bg)", minHeight: "100vh", color: "white" }}>
+      <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
+        <h1 style={{ fontSize: "2rem", fontWeight: "bold" }}>Settlement & Rekonsiliasi</h1>
+        <button onClick={() => router.push("/owner")} style={{ padding: "0.5rem 1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", cursor: "pointer" }}>← Dashboard</button>
+      </div>
+
+      <div className="no-print" style={{ background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: "1px solid var(--color-brand-border)", marginBottom: "2rem", display: "flex", gap: "1rem" }}>
+        <select value={selectedEventId} onChange={e => setSelectedEventId(e.target.value)} style={{ flex: 1, padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", fontSize: "1.1rem" }}>
+          <option value="" disabled>-- Pilih Event untuk di-Settle --</option>
+          {events.map(ev => <option key={ev.id} value={ev.id}>{ev.name} {ev.is_closed ? "(CLOSED)" : "(ACTIVE)"}</option>)}
+        </select>
+        <button onClick={generateReport} disabled={loading} style={{ padding: "1rem 2rem", background: "var(--color-brand-accent)", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "1.1rem" }}>
+          {loading ? "Menghitung..." : "Generate Laporan"}
+        </button>
+        {summary && <button onClick={() => window.print()} style={{ padding: "1rem 2rem", background: "var(--color-brand-green)", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "1.1rem" }}>🖨️ Cetak</button>}
+      </div>
+
+      {summary && (
+        <div id="printable-area">
+          <div style={{ marginBottom: "2rem" }}>
+            <h2 style={{ fontSize: "1.5rem", color: "var(--color-brand-accent-light)", marginBottom: "1rem" }}>Ringkasan Eksekutif</h2>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+              <div style={{ background: "var(--color-brand-surface)", padding: "1.5rem", borderRadius: "12px", border: "1px solid var(--color-brand-border)" }}>
+                <p style={{ color: "var(--color-brand-muted)", fontSize: "0.85rem", textTransform: "uppercase" }}>Total Uang Masuk (Gross)</p>
+                <h3 style={{ fontSize: "2rem", color: "white" }}>Rp {summary.gross.toLocaleString("id-ID")}</h3>
+                <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>
+                  <span>CASH: Rp {summary.cashVolume.toLocaleString("id-ID")}</span>
+                  <span>QRIS: Rp {summary.qrisVolume.toLocaleString("id-ID")}</span>
+                </div>
               </div>
-              <button id="btn-generate-report" onClick={handleGenerate} disabled={loading}
-                style={{ padding:"0.75rem 2rem", borderRadius:"var(--radius-xl)", background:"linear-gradient(135deg, var(--color-brand-green), var(--color-brand-green-dark))", border:"none", color:"white", fontSize:"1rem", fontWeight:"700", cursor:loading?"not-allowed":"pointer", fontFamily:"var(--font-display)", whiteSpace:"nowrap" as const, boxShadow:"0 8px 25px rgba(16,185,129,0.3)" }}>
-                {loading ? "⏳ Memproses..." : "📊 Generate Report"}
-              </button>
+              <div style={{ background: "rgba(16, 185, 129, 0.1)", padding: "1.5rem", borderRadius: "12px", border: "1px solid var(--color-brand-green)" }}>
+                <p style={{ color: "var(--color-brand-green)", fontSize: "0.85rem", textTransform: "uppercase" }}>Pendapatan Bersih Vynalee</p>
+                <h3 style={{ fontSize: "2rem", color: "var(--color-brand-green)" }}>Rp {summary.vynaleeNetRevenue.toLocaleString("id-ID")}</h3>
+              </div>
+              <div style={{ background: "rgba(245, 158, 11, 0.1)", padding: "1.5rem", borderRadius: "12px", border: "1px solid var(--color-brand-yellow)" }}>
+                <p style={{ color: "var(--color-brand-yellow)", fontSize: "0.85rem", textTransform: "uppercase" }}>Total Hutang ke Vendor</p>
+                <h3 style={{ fontSize: "2rem", color: "var(--color-brand-yellow)" }}>Rp {summary.totalVendorPayout.toLocaleString("id-ID")}</h3>
+              </div>
             </div>
           </div>
 
-          {report && (
-            <div>
-              {/* Summary */}
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"1rem", marginBottom:"1.5rem" }}>
-                {[
-                  { label:"Total Gross", value:formatRupiah(report.total_gross), color:"var(--color-brand-green)" },
-                  { label:"Total Transfer ke Vendor", value:formatRupiah(report.total_payout), color:"var(--color-brand-yellow)" },
-                  { label:"Masuk Kas Vynalee", value:formatRupiah(report.total_margin), color:"var(--color-brand-accent-light)" },
-                ].map(c => (
-                  <div key={c.label} style={{ background:"var(--color-brand-card)", border:"1px solid var(--color-brand-border)", borderRadius:"var(--radius-xl)", padding:"1.25rem" }}>
-                    <div style={{ fontSize:"0.75rem", color:"var(--color-brand-muted)", textTransform:"uppercase" as const, letterSpacing:"0.08em", fontWeight:"600", marginBottom:"0.5rem" }}>{c.label}</div>
-                    <div style={{ fontSize:"1.875rem", fontWeight:"800", color:c.color, fontFamily:"var(--font-mono)", letterSpacing:"-0.02em" }}>{c.value}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Vendor breakdown */}
-              <div style={{ background:"var(--color-brand-card)", border:"1px solid var(--color-brand-border)", borderRadius:"var(--radius-xl)", overflow:"hidden", marginBottom:"1.25rem" }}>
-                <div className="no-print" style={{ padding:"1rem 1.5rem", borderBottom:"1px solid var(--color-brand-border)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                  <span style={{ fontWeight:"700", fontSize:"0.95rem" }}>📋 Rincian Per Vendor</span>
-                  <div style={{ display:"flex", gap:"0.5rem" }}>
-                    <button id="btn-export-csv" onClick={handleExportCsv} style={{ background:"var(--color-brand-accent)", border:"none", borderRadius:"8px", padding:"6px 14px", color:"white", cursor:"pointer", fontSize:"0.8rem", fontWeight:"600", fontFamily:"var(--font-display)" }}>📥 Export CSV</button>
-                    <button id="btn-print-settlement" onClick={() => window.print()} style={{ background:"var(--color-brand-green)", border:"none", borderRadius:"8px", padding:"6px 14px", color:"white", cursor:"pointer", fontSize:"0.8rem", fontWeight:"600", fontFamily:"var(--font-display)" }}>🖨️ Print</button>
-                  </div>
-                </div>
-                <div style={{ overflowX:"auto" as const }}>
-                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"0.875rem" }}>
-                    <thead>
-                      <tr>{["Vendor","Komisi","Item Terjual","Gross Revenue","Transfer ke Vendor","Margin Vynalee"].map(h => (
-                        <th key={h} style={{ padding:"0.75rem 1rem", textAlign:"left" as const, background:"var(--color-brand-surface)", color:"var(--color-brand-muted)", fontWeight:"600", fontSize:"0.72rem", textTransform:"uppercase" as const, letterSpacing:"0.07em", border:"1px solid var(--color-brand-border)", whiteSpace:"nowrap" as const }}>{h}</th>
-                      ))}</tr>
-                    </thead>
-                    <tbody>
-                      {report.vendors.map(v => (
-                        <tr key={v.vendor_id} style={{ borderBottom:"1px solid var(--color-brand-border)" }}>
-                          <td style={{ padding:"0.75rem 1rem", fontWeight:"600", color:"var(--color-brand-text)", border:"1px solid var(--color-brand-border)" }}>{v.vendor_name}</td>
-                          <td style={{ padding:"0.75rem 1rem", color:"var(--color-brand-muted)", border:"1px solid var(--color-brand-border)", fontFamily:"var(--font-mono)" }}>{v.commission_rate}%</td>
-                          <td style={{ padding:"0.75rem 1rem", fontFamily:"var(--font-mono)", fontWeight:"700", border:"1px solid var(--color-brand-border)" }}>{v.items_sold} pcs</td>
-                          <td style={{ padding:"0.75rem 1rem", fontFamily:"var(--font-mono)", fontWeight:"700", color:"var(--color-brand-text)", border:"1px solid var(--color-brand-border)" }}>{formatRupiah(v.gross_revenue)}</td>
-                          <td style={{ padding:"0.75rem 1rem", fontFamily:"var(--font-mono)", fontWeight:"700", color:"var(--color-brand-yellow)", border:"1px solid var(--color-brand-border)" }}>{formatRupiah(v.vendor_payout)}</td>
-                          <td style={{ padding:"0.75rem 1rem", fontFamily:"var(--font-mono)", fontWeight:"700", color:"var(--color-brand-green)", border:"1px solid var(--color-brand-border)" }}>{formatRupiah(v.vynalee_margin)}</td>
-                        </tr>
-                      ))}
-                      <tr style={{ background:"var(--color-brand-surface)", fontWeight:"700" }}>
-                        <td colSpan={2} style={{ padding:"0.875rem 1rem", border:"1px solid var(--color-brand-border)", color:"var(--color-brand-text)", fontWeight:"800" }}>TOTAL</td>
-                        <td style={{ padding:"0.875rem 1rem", border:"1px solid var(--color-brand-border)", fontFamily:"var(--font-mono)", fontWeight:"800" }}>{report.vendors.reduce((s,v)=>s+v.items_sold,0)} pcs</td>
-                        <td style={{ padding:"0.875rem 1rem", border:"1px solid var(--color-brand-border)", fontFamily:"var(--font-mono)", fontWeight:"800", color:"var(--color-brand-text)" }}>{formatRupiah(report.total_gross)}</td>
-                        <td style={{ padding:"0.875rem 1rem", border:"1px solid var(--color-brand-border)", fontFamily:"var(--font-mono)", fontWeight:"800", color:"var(--color-brand-yellow)" }}>{formatRupiah(report.total_payout)}</td>
-                        <td style={{ padding:"0.875rem 1rem", border:"1px solid var(--color-brand-border)", fontFamily:"var(--font-mono)", fontWeight:"800", color:"var(--color-brand-green)" }}>{formatRupiah(report.total_margin)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <p style={{ fontSize:"0.75rem", color:"var(--color-brand-muted)", textAlign:"center" as const }}>Generated: {new Date(report.generated_at).toLocaleString("id-ID")}</p>
+          <div>
+            <h2 style={{ fontSize: "1.5rem", color: "var(--color-brand-accent-light)", marginBottom: "1rem" }}>Daftar Payout Vendor (Konsinyasi)</h2>
+            <div style={{ background: "var(--color-brand-surface)", borderRadius: "12px", border: "1px solid var(--color-brand-border)", overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                <thead>
+                  <tr style={{ background: "var(--color-brand-border)", color: "var(--color-brand-muted)", textTransform: "uppercase", fontSize: "0.85rem" }}>
+                    <th style={{ padding: "1rem" }}>Nama Vendor</th>
+                    <th style={{ padding: "1rem" }}>Item Terjual</th>
+                    <th style={{ padding: "1rem" }}>Total Penjualan</th>
+                    <th style={{ padding: "1rem" }}>Potongan Komisi Vynalee</th>
+                    <th style={{ padding: "1rem", color: "white" }}>Transfer ke Vendor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vendorPayouts.length === 0 ? (
+                    <tr><td colSpan={5} style={{ padding: "2rem", textAlign: "center", color: "var(--color-brand-muted)" }}>Tidak ada data penjualan vendor pada event ini.</td></tr>
+                  ) : vendorPayouts.map((v, idx) => (
+                    <tr key={idx} style={{ borderTop: "1px solid var(--color-brand-border)" }}>
+                      <td style={{ padding: "1rem", fontWeight: "bold" }}>{v.name}</td>
+                      <td style={{ padding: "1rem" }}>{v.items_sold} pcs</td>
+                      <td style={{ padding: "1rem" }}>Rp {v.gross_sales.toLocaleString("id-ID")}</td>
+                      <td style={{ padding: "1rem", color: "var(--color-brand-red)" }}>- Rp {v.commission_cut.toLocaleString("id-ID")}</td>
+                      <td style={{ padding: "1rem", color: "var(--color-brand-green)", fontWeight: "bold", fontSize: "1.1rem" }}>Rp {v.net_payout.toLocaleString("id-ID")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
         </div>
-      </div>
-    </>
+      )}
+
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          body * { visibility: hidden; }
+          .no-print { display: none !important; }
+          #printable-area, #printable-area * { visibility: visible; }
+          #printable-area { position: absolute; left: 0; top: 0; width: 100%; color: black !important; }
+          #printable-area div, #printable-area p, #printable-area h2, #printable-area h3, #printable-area th, #printable-area td { color: black !important; border-color: #ccc !important; }
+        }
+      `}} />
+    </div>
   );
 }

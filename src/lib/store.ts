@@ -28,6 +28,7 @@ export interface CachedItem {
   discount_percentage: number;
   vendor_id: string | null;
   status: string;
+  barcode?: string | null;
 }
 
 export interface PendingTransaction {
@@ -71,7 +72,6 @@ interface CartStore {
 
 async function pushTxnToSupabase(p: PendingTransaction): Promise<boolean> {
   try {
-    // 1. DAFTARKAN PELANGGAN DULU (Mencegah Foreign Key Error)
     if (p.customerPhone) {
       await supabase.from("customers").upsert(
         { phone_number: p.customerPhone, last_visit: new Date().toISOString() },
@@ -81,7 +81,6 @@ async function pushTxnToSupabase(p: PendingTransaction): Promise<boolean> {
 
     const codePct = p.discountPct / 100;
     
-    // 2. INSERT TRANSAKSI
     const { data: txn, error: txnErr } = await supabase
       .from("transactions")
       .insert({
@@ -104,7 +103,6 @@ async function pushTxnToSupabase(p: PendingTransaction): Promise<boolean> {
       return false;
     }
 
-    // 3. INSERT PIVOT ITEM
     const pivotRows = p.items.map((item) => {
       const priceAtSale = codePct > 0 ? Math.round(item.price * (1 - codePct)) : item.price;
       return {
@@ -120,10 +118,11 @@ async function pushTxnToSupabase(p: PendingTransaction): Promise<boolean> {
     const { error: pivotErr } = await supabase.from("transaction_items").insert(pivotRows);
     if (pivotErr) {
       console.error("DB_PIVOT_ERROR:", pivotErr);
+      // ROLLBACK TRANSAKSI JIKA ITEM GAGAL MASUK
+      await supabase.from("transactions").delete().eq("id", txn.id);
       return false;
     }
 
-    // 4. UBAH STATUS BARANG
     await supabase.from("items").update({ status: "sold" }).in("id", p.items.map((i) => i.id));
     return true;
   } catch (err) {
@@ -148,16 +147,23 @@ export const useCartStore = create<CartStore>()(
 
       addItem: (item) => set((state) => {
         if (state.items.find((i) => i.id === item.id)) return state;
-        return { items: [...state.items, item] };
+        return { 
+          items: [...state.items, item],
+          // Sync Cache: Ubah status di lokal agar tidak bisa di-scan 2x
+          cachedItems: state.cachedItems.map(i => i.id === item.id ? { ...i, status: "in_cart" } : i)
+        };
       }),
 
       voidCartItem: async (id, cashierName, cashierId, reason) => {
-        // Hapus langsung dari UI tanpa blokir
-        set((state) => ({ items: state.items.filter((i) => i.id !== id) }));
-        // Log diam-diam ke Supabase
+        set((state) => ({ 
+          items: state.items.filter((i) => i.id !== id),
+          // Sync Cache: Kembalikan ke available secara instan di lokal
+          cachedItems: state.cachedItems.map(i => i.id === id ? { ...i, status: "available" } : i)
+        }));
+        
         supabase.from("items").update({ status: "available" }).eq("id", id).then();
         supabase.from("audit_logs").insert({
-          action: "VOID_ITEM",
+          action: "VOID_CART_ITEM",
           item_id: id,
           cashier_name: cashierName,
           cashier_id: cashierId,
@@ -169,15 +175,21 @@ export const useCartStore = create<CartStore>()(
         const { items } = get();
         if (!items.length) return;
         const ids = items.map((i) => i.id);
-        set({ items: [], appliedDiscount: null });
+        
+        set((state) => ({ 
+          items: [], 
+          appliedDiscount: null,
+          // Sync Cache: Kembalikan semua barang ke available di lokal
+          cachedItems: state.cachedItems.map(i => ids.includes(i.id) ? { ...i, status: "available" } : i)
+        }));
         
         supabase.from("items").update({ status: "available" }).in("id", ids).then();
         supabase.from("audit_logs").insert({
           action: "CART_CLEAR",
           cashier_name: cashierName,
           cashier_id: cashierId,
-          reason: "Cart cleared by cashier",
-          old_value: ids.join(", "),
+          reason: "Kasir mengosongkan seluruh keranjang",
+          item_id: ids.join(", "),
         }).then();
       },
 
@@ -230,7 +242,6 @@ export const useCartStore = create<CartStore>()(
           return { success: true };
         }
 
-        // Jika offline, ubah status item di cache lokal agar tidak double scan, lalu antre
         set((state) => ({
           cachedItems: state.cachedItems.map(item => items.find(i => i.id === item.id) ? { ...item, status: "sold" } : item),
           pendingTransactions: [...state.pendingTransactions, pending],
@@ -256,7 +267,7 @@ export const useCartStore = create<CartStore>()(
         try {
           const { data } = await supabase.from("items").select("*").eq("status", "available").limit(5000);
           if (data) set({ cachedItems: data as CachedItem[], cacheLastSync: Date.now() });
-        } catch { /* abaikan jika offline */ }
+        } catch { }
       },
     }),
     {
