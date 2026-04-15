@@ -1,0 +1,14 @@
+{
+  "name": "Why Not Preloved POS",
+  "short_name": "WNP POS",
+  "description": "Sistem POS untuk event preloved Why Not Preloved",
+  "start_url": "/login",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0f",
+  "theme_color": "#7c3aed",
+  "icons": [
+    { "src": "/logo.jpg", "sizes": "192x192", "type": "image/jpeg", "purpose": "any" },
+    { "src": "/logo.jpg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any" }
+  ]
+}
