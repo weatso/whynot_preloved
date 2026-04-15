@@ -1,131 +1,174 @@
 ﻿"use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/lib/authStore";
 import { supabase } from "@/lib/supabase";
-import { generateSkuBatch, formatRupiah, type GeneratedSku } from "@/lib/skuGenerator";
-import type { Vendor } from "@/lib/supabase";
+import { useAuthStore } from "@/lib/authStore";
+import { useRouter } from "next/navigation";
 
-export default function GeneratePage() {
+export default function GenerateSKUPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [count, setCount] = useState(50);
-  const [price, setPrice] = useState(100000);
-  const [prefix, setPrefix] = useState("PRL");
-  const [vendorId, setVendorId] = useState<string>("");
-  const [costPrice, setCostPrice] = useState(0);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [result, setResult] = useState<GeneratedSku[]|null>(null);
-  const [error, setError] = useState<string|null>(null);
-  const [success, setSuccess] = useState(false);
-
-  useEffect(() => { if (!user) router.replace("/login"); else if (user.role !== "owner") router.replace("/kasir"); }, [user, router]);
+  const [vendors, setVendors] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  
+  // Form State
+  const [vendorId, setVendorId] = useState("");
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("Pakaian");
+  const [price, setPrice] = useState("");
+  const [qty, setQty] = useState("1");
+  const [generatedItems, setGeneratedItems] = useState<any[]>([]);
 
   useEffect(() => {
-    supabase.from("vendors").select("*").eq("is_active",true).then(({data}) => {
-      if (data) { setVendors(data as Vendor[]); setVendorId(data[0]?.id || ""); }
-    });
-  }, []);
+    if (!user || user.role !== "owner") router.replace("/login");
+    else fetchVendors();
+  }, [user, router]);
+
+  const fetchVendors = async () => {
+    const { data } = await supabase.from("vendors").select("id, code, name, item_count").eq("is_active", true);
+    if (data) {
+      setVendors(data);
+      if (data.length > 0) setVendorId(data[0].id);
+    }
+  };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsGenerating(true); setError(null); setResult(null); setSuccess(false);
-    const { success:ok, items, error:err } = await generateSkuBatch(count, price, prefix, vendorId || null, costPrice);
-    setIsGenerating(false);
-    if (!ok) { setError(err ?? "Error"); setResult(items); } else { setResult(items); setSuccess(true); }
+    if (!name || !price || !vendorId) return alert("Lengkapi data!");
+    
+    setLoading(true);
+    const vendor = vendors.find(v => v.id === vendorId);
+    const quantity = parseInt(qty);
+    const currentCount = vendor.item_count || 0;
+    
+    const newItems = [];
+    for (let i = 1; i <= quantity; i++) {
+      const seqNumber = (currentCount + i).toString().padStart(4, '0');
+      newItems.push({
+        id: `${vendor.code}-${seqNumber}`,
+        vendor_id: vendor.id,
+        name: name.trim(),
+        category,
+        price: parseInt(price),
+        status: "available"
+      });
+    }
+
+    const { error } = await supabase.from("items").insert(newItems);
+    
+    if (error) {
+      alert("Gagal generate SKU. Cek koneksi.");
+      console.error(error);
+    } else {
+      await supabase.from("vendors").update({ item_count: currentCount + quantity }).eq("id", vendor.id);
+      setGeneratedItems(newItems);
+      setName(""); setPrice(""); setQty("1");
+      fetchVendors(); // Update count
+    }
+    setLoading(false);
   };
 
-  const selectedVendor = vendors.find(v => v.id === vendorId);
-  const pLabel = price >= 1000 ? `${Math.round(price/1000)}K` : `${price}`;
-
-  if (!user || user.role !== "owner") return null;
+  if (!user) return null;
 
   return (
-    <>
-      <style>{`@media print { body * { visibility:hidden; } #print-area,#print-area * { visibility:visible; } #print-area { position:absolute; top:0; left:0; width:100%; } .no-print { display:none !important; } }`}</style>
-      <div style={{ minHeight:"100vh", background:"var(--color-brand-bg)", fontFamily:"var(--font-display)" }}>
-        <header className="no-print" style={{ background:"var(--color-brand-surface)", borderBottom:"1px solid var(--color-brand-border)", padding:"0.875rem 1.5rem", display:"flex", alignItems:"center", gap:"0.75rem" }}>
-          <button id="btn-back-owner" onClick={() => router.push("/owner")} style={{ background:"transparent", border:"1px solid var(--color-brand-border)", borderRadius:"8px", padding:"5px 12px", color:"var(--color-brand-muted)", cursor:"pointer", fontSize:"0.8rem", fontFamily:"var(--font-display)" }}>← Dashboard</button>
-          <span style={{ fontSize:"1.25rem" }}>🏷️</span>
-          <span style={{ fontWeight:"700", color:"var(--color-brand-text)" }}>Generate SKU Batch</span>
-        </header>
-        <div style={{ maxWidth:"800px", margin:"0 auto", padding:"2rem 1.5rem" }}>
-          <div className="no-print" style={{ background:"var(--color-brand-card)", border:"1px solid var(--color-brand-border)", borderRadius:"var(--radius-xl)", padding:"2rem", marginBottom:"1.5rem" }}>
-            <h1 style={{ fontSize:"1.2rem", fontWeight:"700", marginBottom:"0.4rem" }}>Generate Label SKU</h1>
-            <p style={{ color:"var(--color-brand-muted)", fontSize:"0.875rem", marginBottom:"1.75rem" }}>Bulk insert items ke database + cetak label thermal.</p>
-            <form onSubmit={handleGenerate}>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))", gap:"1rem", marginBottom:"1.25rem" }}>
-                {[
-                  { id:"input-prefix", label:"Prefix", value:prefix, type:"text", onChange:(v:string) => setPrefix(v.toUpperCase()), maxLen:5 },
-                  { id:"input-count", label:"Jumlah", value:count, type:"number", onChange:(v:string) => setCount(Number(v)), min:1, max:500 },
-                  { id:"input-price", label:"Harga Jual (Rp)", value:price, type:"number", onChange:(v:string) => setPrice(Number(v)), min:1000, step:1000 },
-                  { id:"input-cost", label:"Harga Modal (Rp)", value:costPrice, type:"number", onChange:(v:string) => setCostPrice(Number(v)), min:0, step:1000 },
-                ].map(({id,label,value,type,onChange,maxLen,min,max,step}) => (
-                  <div key={id}>
-                    <label htmlFor={id} style={{ display:"block", fontSize:"0.75rem", color:"var(--color-brand-muted)", textTransform:"uppercase" as const, letterSpacing:"0.08em", fontWeight:"600", marginBottom:"0.4rem" }}>{label}</label>
-                    <input id={id} type={type} value={value as string|number} onChange={e => onChange(e.target.value)} maxLength={maxLen} min={min} max={max} step={step}
-                      style={{ width:"100%", background:"var(--color-brand-surface)", border:"1px solid var(--color-brand-border)", borderRadius:"10px", padding:"0.75rem 0.875rem", color:"var(--color-brand-text)", fontSize:"1rem", fontWeight:"700", fontFamily:"var(--font-mono)", outline:"none" }}/>
+    <div style={{ padding: "2rem", background: "var(--color-brand-bg)", minHeight: "100vh", color: "white" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }} className="no-print">
+        <h1 style={{ fontSize: "2rem", fontWeight: "bold" }}>Generate SKU Massal</h1>
+        <button onClick={() => router.push("/owner")} style={{ padding: "0.5rem 1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", cursor: "pointer" }}>← Dashboard</button>
+      </div>
+
+      <div style={{ display: "flex", gap: "2rem", alignItems: "flex-start" }} className="no-print">
+        {/* PANEL INPUT */}
+        <div style={{ flex: 1, background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: "1px solid var(--color-brand-border)" }}>
+          <form onSubmit={handleGenerate} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            
+            <div>
+              <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)", marginBottom: "0.5rem", display: "block" }}>Pilih Vendor (Pemilik Barang)</label>
+              <select value={vendorId} onChange={e => setVendorId(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none" }}>
+                {vendors.map(v => <option key={v.id} value={v.id}>{v.name} (Code: {v.code})</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)", marginBottom: "0.5rem", display: "block" }}>Nama Barang (Umum)</label>
+              <input type="text" placeholder="misal: Kemeja Flannel Preloved" value={name} onChange={e => setName(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none" }} />
+            </div>
+
+            <div style={{ display: "flex", gap: "1rem" }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)", marginBottom: "0.5rem", display: "block" }}>Kategori</label>
+                <select value={category} onChange={e => setCategory(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none" }}>
+                  <option value="Pakaian">Pakaian</option>
+                  <option value="Tas">Tas</option>
+                  <option value="Sepatu">Sepatu</option>
+                  <option value="Aksesoris">Aksesoris</option>
+                  <option value="Lainnya">Lainnya</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)", marginBottom: "0.5rem", display: "block" }}>Harga Jual (Rp)</label>
+                <input type="number" placeholder="50000" value={price} onChange={e => setPrice(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", fontFamily: "var(--font-mono)" }} />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)", marginBottom: "0.5rem", display: "block" }}>Jumlah Label Dibuat</label>
+              <input type="number" min="1" max="100" value={qty} onChange={e => setQty(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", fontSize: "1.2rem", fontWeight: "bold" }} />
+            </div>
+
+            <button type="submit" disabled={loading} style={{ padding: "1.2rem", background: "var(--color-brand-accent)", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: loading ? "not-allowed" : "pointer", marginTop: "1rem", fontSize: "1.1rem" }}>
+              {loading ? "Memproses..." : "⚡ GENERATE SKU"}
+            </button>
+          </form>
+        </div>
+
+        {/* PANEL HASIL & PRINT */}
+        <div style={{ flex: 1, background: "var(--color-brand-surface)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: "1px dashed var(--color-brand-border)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+            <h2 style={{ fontSize: "1.2rem", color: "var(--color-brand-green)" }}>Label Siap Cetak</h2>
+            {generatedItems.length > 0 && (
+              <button onClick={() => window.print()} style={{ padding: "0.5rem 1rem", background: "var(--color-brand-green)", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>🖨️ Print Label</button>
+            )}
+          </div>
+          
+          <div style={{ maxHeight: "400px", overflowY: "auto", paddingRight: "0.5rem" }}>
+            {generatedItems.length === 0 ? (
+              <p style={{ color: "var(--color-brand-muted)", textAlign: "center", marginTop: "2rem" }}>Belum ada label digenerate sesi ini.</p>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+                {generatedItems.map(item => (
+                  <div key={item.id} style={{ background: "white", color: "black", padding: "0.8rem", borderRadius: "4px", textAlign: "center", border: "1px solid #ccc" }}>
+                    <div style={{ fontSize: "0.7rem", fontWeight: "bold", textTransform: "uppercase" }}>WNP Preloved</div>
+                    <div style={{ fontSize: "1.2rem", fontWeight: "900", fontFamily: "monospace", margin: "0.2rem 0" }}>{item.id}</div>
+                    <div style={{ fontSize: "0.9rem", fontWeight: "bold" }}>Rp {item.price.toLocaleString("id-ID")}</div>
                   </div>
                 ))}
               </div>
-              <div style={{ marginBottom:"1.25rem" }}>
-                <label htmlFor="input-vendor" style={{ display:"block", fontSize:"0.75rem", color:"var(--color-brand-muted)", textTransform:"uppercase" as const, letterSpacing:"0.08em", fontWeight:"600", marginBottom:"0.4rem" }}>Vendor / Pemilik Barang</label>
-                <select id="input-vendor" value={vendorId} onChange={e => setVendorId(e.target.value)}
-                  style={{ width:"100%", background:"var(--color-brand-surface)", border:"1px solid var(--color-brand-border)", borderRadius:"10px", padding:"0.75rem 0.875rem", color:"var(--color-brand-text)", fontSize:"0.95rem", fontWeight:"600", fontFamily:"var(--font-display)", outline:"none", cursor:"pointer" }}>
-                  {vendors.map(v => <option key={v.id} value={v.id}>{v.name} ({v.commission_rate_percentage}% komisi)</option>)}
-                </select>
-                {selectedVendor && selectedVendor.commission_rate_percentage > 0 && (
-                  <div style={{ marginTop:"0.5rem", fontSize:"0.8rem", color:"var(--color-brand-yellow)" }}>
-                    💡 Hitung margin: Rp {price.toLocaleString("id-ID")} × {100-selectedVendor.commission_rate_percentage}% = <strong>{formatRupiah(price*(1-selectedVendor.commission_rate_percentage/100))}</strong> per item ke Vynalee
-                  </div>
-                )}
-              </div>
-              {count > 0 && price > 0 && prefix && (
-                <div style={{ background:"rgba(124,58,237,0.1)", border:"1px solid rgba(124,58,237,0.3)", borderRadius:"10px", padding:"0.875rem", marginBottom:"1.25rem", fontSize:"0.875rem", color:"var(--color-brand-accent-light)", fontFamily:"var(--font-mono)" }}>
-                  Preview: <strong>{prefix}-{pLabel}-001</strong> ... <strong>{prefix}-{pLabel}-{String(count).padStart(3,"0")}</strong>
-                  <span style={{ marginLeft:"1.5rem", color:"var(--color-brand-muted)", fontFamily:"var(--font-display)" }}>
-                    Total nilai: <strong style={{ color:"var(--color-brand-green)" }}>{formatRupiah(price*count)}</strong>
-                  </span>
-                </div>
-              )}
-              <button id="btn-generate-sku" type="submit" disabled={isGenerating}
-                style={{ width:"100%", padding:"1rem", borderRadius:"var(--radius-xl)", background:isGenerating?"var(--color-brand-surface)":"linear-gradient(135deg, var(--color-brand-accent), #5b21b6)", border:"none", color:"white", fontSize:"1.05rem", fontWeight:"700", cursor:isGenerating?"not-allowed":"pointer", fontFamily:"var(--font-display)", boxShadow:isGenerating?"none":"0 8px 25px rgba(124,58,237,0.35)" }}>
-                {isGenerating ? "⏳ Generating..." : `🏷️ Generate ${count} SKU`}
-              </button>
-            </form>
-            {error && <div className="slide-in" style={{ marginTop:"1rem", padding:"0.875rem", background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:"10px", color:"var(--color-brand-red)", fontSize:"0.875rem", fontWeight:"600" }}>❌ {error}</div>}
-            {success && <div className="slide-in" style={{ marginTop:"1rem", padding:"0.875rem", background:"rgba(16,185,129,0.1)", border:"1px solid rgba(16,185,129,0.3)", borderRadius:"10px", color:"var(--color-brand-green)", fontSize:"0.875rem", fontWeight:"600" }}>✅ {result?.length} SKU berhasil dibuat!</div>}
+            )}
           </div>
-
-          {result && result.length > 0 && (
-            <div style={{ background:"var(--color-brand-card)", border:"1px solid var(--color-brand-border)", borderRadius:"var(--radius-xl)", overflow:"hidden" }}>
-              <div className="no-print" style={{ padding:"1rem 1.5rem", borderBottom:"1px solid var(--color-brand-border)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                <span style={{ fontWeight:"700", color:"var(--color-brand-text)" }}>{result.length} Label Siap Cetak</span>
-                <button id="btn-print" onClick={() => window.print()} style={{ background:"var(--color-brand-green)", border:"none", borderRadius:"8px", padding:"7px 16px", color:"white", cursor:"pointer", fontSize:"0.875rem", fontWeight:"600", fontFamily:"var(--font-display)" }}>🖨️ Print</button>
-              </div>
-              <div id="print-area" style={{ padding:"1rem", overflowX:"auto" as const }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"0.8rem" }}>
-                  <thead>
-                    <tr>{["No","ID / Barcode","Harga","Vendor","Status"].map(h => <th key={h} style={{ padding:"0.625rem 0.875rem", textAlign:"left" as const, background:"var(--color-brand-surface)", color:"var(--color-brand-muted)", fontWeight:"600", fontSize:"0.7rem", textTransform:"uppercase" as const, letterSpacing:"0.08em", border:"1px solid var(--color-brand-border)" }}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {result.map((item,idx) => (
-                      <tr key={item.id}>
-                        <td style={{ padding:"0.5rem 0.875rem", border:"1px solid var(--color-brand-border)", color:"var(--color-brand-muted)", fontSize:"0.75rem" }}>{idx+1}</td>
-                        <td style={{ padding:"0.5rem 0.875rem", border:"1px solid var(--color-brand-border)", fontFamily:"var(--font-mono)", fontWeight:"700", letterSpacing:"0.05em" }}>{item.id}</td>
-                        <td style={{ padding:"0.5rem 0.875rem", border:"1px solid var(--color-brand-border)", fontWeight:"700", color:"var(--color-brand-green)", fontFamily:"var(--font-mono)" }}>{formatRupiah(item.price)}</td>
-                        <td style={{ padding:"0.5rem 0.875rem", border:"1px solid var(--color-brand-border)", fontSize:"0.75rem", color:"var(--color-brand-muted)" }}>{selectedVendor?.name || "—"}</td>
-                        <td style={{ padding:"0.5rem 0.875rem", border:"1px solid var(--color-brand-border)" }}><span style={{ background:"rgba(16,185,129,0.15)", color:"var(--color-brand-green)", borderRadius:"20px", padding:"2px 8px", fontSize:"0.7rem", fontWeight:"600" }}>available</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
       </div>
-    </>
+
+      {/* STYLE KHUSUS UNTUK PRINT CSS */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          body * { visibility: hidden; }
+          .no-print { display: none !important; }
+          #printable-area, #printable-area * { visibility: visible; }
+          #printable-area { position: absolute; left: 0; top: 0; width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+          .print-label { border: 1px solid black; padding: 10px; text-align: center; }
+        }
+      `}} />
+
+      {/* DUMMY HIDDEN AREA UNTUK PRINT SAJA */}
+      <div id="printable-area" style={{ display: "none" }}>
+        {generatedItems.map(item => (
+          <div key={item.id} className="print-label" style={{ color: "black" }}>
+            <div style={{ fontSize: "10px", fontWeight: "bold" }}>WNP Preloved</div>
+            <div style={{ fontSize: "16px", fontWeight: "bold", margin: "4px 0" }}>{item.id}</div>
+            <div style={{ fontSize: "14px" }}>Rp {item.price.toLocaleString("id-ID")}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

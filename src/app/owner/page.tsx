@@ -1,148 +1,182 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/lib/authStore";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { formatRupiah } from "@/lib/skuGenerator";
-import ShrinkageAlert from "@/components/ShrinkageAlert";
-import VoidTracker from "@/components/VoidTracker";
+import { useAuthStore } from "@/lib/authStore";
+import { useRouter } from "next/navigation";
 
-interface Metrics { gross: number; netMargin: number; itemsSold: number; availableStock: number; }
-interface Log { id: string; item_id: string; price: number; method: string; cashier: string; time: string; }
-
-const POLL = 4000;
-
-export default function OwnerPage() {
+export default function SettlementPage() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
-  const [metrics, setMetrics] = useState<Metrics>({ gross:0, netMargin:0, itemsSold:0, availableStock:0 });
-  const [logs, setLogs] = useState<Log[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [pulsed, setPulsed] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date|null>(null);
+  const { user } = useAuthStore();
+  const [events, setEvents] = useState<any[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState("");
+  const [loading, setLoading] = useState(false);
+  
+  const [summary, setSummary] = useState<any>(null);
+  const [vendorPayouts, setVendorPayouts] = useState<any[]>([]);
 
-  useEffect(() => { if (!user) router.replace("/login"); else if (user.role !== "owner") router.replace("/kasir"); }, [user, router]);
+  useEffect(() => {
+    if (!user || user.role !== "owner") router.replace("/login");
+    else fetchEvents();
+  }, [user, router]);
 
-  const pulse = () => { setPulsed(true); setTimeout(() => setPulsed(false), 600); };
+  const fetchEvents = async () => {
+    const { data } = await supabase.from("events").select("id, name, is_closed").order("created_at", { ascending: false });
+    if (data) setEvents(data);
+  };
 
-  const fetchAll = useCallback(async () => {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const todayISO = today.toISOString();
-    const [txRes, soldRes, stockRes, logRes] = await Promise.all([
-      supabase.from("transactions").select("total_amount, discount_applied, transaction_items(price_at_sale, items(vendor_id, vendors(commission_rate_percentage)))").eq("status","completed").gte("created_at", todayISO),
-      supabase.from("transaction_items").select("item_id, transactions!inner(created_at, status)").eq("transactions.status","completed").gte("transactions.created_at", todayISO),
-      supabase.from("items").select("id",{count:"exact",head:true}).eq("status","available"),
-      supabase.from("transaction_items").select("item_id, price_at_sale, transactions!inner(id,payment_method,cashier_name,created_at,status), items(price)").eq("transactions.status","completed").order("transaction_id",{ascending:false}).limit(25),
-    ]);
-    const gross = txRes.data?.reduce((s,t) => s + (t.total_amount||0), 0) ?? 0;
-    let vendorPayout = 0;
-    txRes.data?.forEach(txn => {
-      type TI = {price_at_sale:number, items:{vendor_id:string|null, vendors:{commission_rate_percentage:number}|null}|null};
-      const tiList = (txn.transaction_items as unknown as TI[]|null);
-      tiList?.forEach(ti => {
-        const rate = ti.items?.vendors?.commission_rate_percentage ?? 0;
-        vendorPayout += (ti.price_at_sale || 0) * (rate / 100);
+  const generateReport = async () => {
+    if (!selectedEventId) return alert("Pilih event terlebih dahulu");
+    setLoading(true);
+
+    // Tarik semua transaksi beserta item dan data vendornya
+    const { data: txns, error } = await supabase
+      .from("transactions")
+      .select(`
+        id, total_amount, discount_applied, payment_method,
+        transaction_items (
+          price_at_sale, discount_applied, discount_bearer,
+          items ( vendor_id, price, vendors ( id, name, commission_rate_percentage ) )
+        )
+      `)
+      .eq("event_id", selectedEventId)
+      .eq("status", "completed");
+
+    if (error || !txns) {
+      alert("Gagal menarik data");
+      setLoading(false);
+      return;
+    }
+
+    let gross = 0;
+    let totalDiscount = 0;
+    let cashVolume = 0;
+    let qrisVolume = 0;
+    let vendorMap: Record<string, { name: string; gross_sales: number; commission_cut: number; net_payout: number; items_sold: number }> = {};
+
+    txns.forEach((txn: any) => {
+      gross += Number(txn.total_amount);
+      totalDiscount += Number(txn.discount_applied);
+      if (txn.payment_method === "CASH") cashVolume += Number(txn.total_amount);
+      else qrisVolume += Number(txn.total_amount);
+
+      txn.transaction_items.forEach((ti: any) => {
+        const item = ti.items;
+        const vendor = item.vendors;
+        if (!vendor) return; // Barang Vynalee sendiri atau tidak ada vendor
+
+        const vendorId = vendor.id;
+        const salePrice = Number(ti.price_at_sale);
+        
+        // Asumsi MVP: Komisi dipotong dari harga jual akhir
+        const commissionRate = Number(vendor.commission_rate_percentage) / 100;
+        const commissionCut = salePrice * commissionRate;
+        const netPayout = salePrice - commissionCut;
+
+        if (!vendorMap[vendorId]) {
+          vendorMap[vendorId] = { name: vendor.name, gross_sales: 0, commission_cut: 0, net_payout: 0, items_sold: 0 };
+        }
+        
+        vendorMap[vendorId].gross_sales += salePrice;
+        vendorMap[vendorId].commission_cut += commissionCut;
+        vendorMap[vendorId].net_payout += netPayout;
+        vendorMap[vendorId].items_sold += 1;
       });
     });
-    const newMetrics = { gross, netMargin: gross - vendorPayout, itemsSold: soldRes.data?.length ?? 0, availableStock: stockRes.count ?? 0 };
-    setMetrics(prev => { if (JSON.stringify(prev) !== JSON.stringify(newMetrics)) pulse(); return newMetrics; });
-    const newLogs: Log[] = (logRes.data || []).filter(d => d.transactions).map(d => {
-      const txn = Array.isArray(d.transactions) ? d.transactions[0] : d.transactions;
-      return { id: txn?.id, item_id: d.item_id, price: d.price_at_sale, method: txn?.payment_method ?? "", cashier: txn?.cashier_name ?? "?", time: txn?.created_at ?? "" };
-    });
-    setLogs(newLogs);
-    setLastUpdate(new Date());
-  }, []);
 
-  useEffect(() => { fetchAll().finally(()=>setLoading(false)); }, [fetchAll]);
-  useEffect(() => { const t = setInterval(fetchAll, POLL); return () => clearInterval(t); }, [fetchAll]);
+    const payoutsArray = Object.values(vendorMap).sort((a, b) => b.net_payout - a.net_payout);
+    const totalVendorPayout = payoutsArray.reduce((sum, v) => sum + v.net_payout, 0);
+    const vynaleeNetRevenue = gross - totalVendorPayout;
 
-  const fTime = (iso:string) => { try { return new Date(iso).toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"}); } catch { return "--"; } };
+    setSummary({ gross, totalDiscount, cashVolume, qrisVolume, totalVendorPayout, vynaleeNetRevenue });
+    setVendorPayouts(payoutsArray);
+    setLoading(false);
+  };
 
-  if (!user || user.role !== "owner") return null;
-
-  const MetricCard = ({ label, value, color, icon, sub }: { label:string; value:string; color:string; icon:string; sub?:string }) => (
-    <div className={pulsed?"metric-updated":""} style={{ background:"var(--color-brand-card)", border:"1px solid var(--color-brand-border)", borderRadius:"var(--radius-xl)", padding:"1.5rem", position:"relative", overflow:"hidden" }}>
-      <div style={{ position:"absolute", top:"-15px", right:"-15px", width:"80px", height:"80px", borderRadius:"50%", background:`radial-gradient(circle, ${color}22 0%, transparent 70%)` }}/>
-      <div style={{ fontSize:"0.75rem", color:"var(--color-brand-muted)", textTransform:"uppercase" as const, letterSpacing:"0.1em", fontWeight:"600", marginBottom:"0.6rem", display:"flex", gap:"0.5rem", alignItems:"center" }}>
-        <span>{icon}</span>{label}
-      </div>
-      <div style={{ fontSize:"2.25rem", fontWeight:"800", color, fontFamily:"var(--font-mono)", lineHeight:1, letterSpacing:"-0.02em" }}>
-        {loading ? <span style={{opacity:0.3}}>—</span> : value}
-      </div>
-      {sub && <div style={{ fontSize:"0.75rem", color:"var(--color-brand-muted)", marginTop:"4px" }}>{sub}</div>}
-    </div>
-  );
+  if (!user) return null;
 
   return (
-    <div style={{ minHeight:"100vh", background:"var(--color-brand-bg)", fontFamily:"var(--font-display)" }}>
-      <header style={{ background:"var(--color-brand-surface)", borderBottom:"1px solid var(--color-brand-border)", padding:"0.875rem 1.5rem", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"0.75rem" }}>
-          <span style={{ fontSize:"1.25rem" }}>📊</span>
-          <div>
-            <span style={{ fontWeight:"700", color:"var(--color-brand-text)" }}>Vynalee POS</span>
-            <span style={{ marginLeft:"0.6rem", fontSize:"0.7rem", color:"#fbbf24", background:"rgba(251,191,36,0.15)", padding:"2px 8px", borderRadius:"20px", fontWeight:"600", textTransform:"uppercase" as const }}>OWNER</span>
-          </div>
-        </div>
-        <div style={{ display:"flex", gap:"0.625rem", alignItems:"center" }}>
-          <button id="btn-to-generate" onClick={() => router.push("/owner/generate")} style={{ background:"linear-gradient(135deg, var(--color-brand-accent), #5b21b6)", border:"none", borderRadius:"8px", padding:"7px 14px", color:"white", cursor:"pointer", fontSize:"0.8rem", fontWeight:"600", fontFamily:"var(--font-display)" }}>🏷️ Generate SKU</button>
-          <button id="btn-to-settlement" onClick={() => router.push("/owner/settlement")} style={{ background:"linear-gradient(135deg, var(--color-brand-green), var(--color-brand-green-dark))", border:"none", borderRadius:"8px", padding:"7px 14px", color:"white", cursor:"pointer", fontSize:"0.8rem", fontWeight:"600", fontFamily:"var(--font-display)" }}>📄 Settlement</button>
-          <button id="btn-to-audit" onClick={() => router.push("/owner/audit")} style={{ background:"var(--color-brand-surface)", border:"1px solid var(--color-brand-border)", borderRadius:"8px", padding:"7px 14px", color:"var(--color-brand-muted)", cursor:"pointer", fontSize:"0.8rem", fontFamily:"var(--font-display)" }}>🔍 Audit</button>
-          <button id="btn-logout-owner" onClick={() => { logout(); router.replace("/login"); }} style={{ background:"transparent", border:"1px solid var(--color-brand-border)", borderRadius:"8px", padding:"5px 12px", color:"var(--color-brand-muted)", cursor:"pointer", fontSize:"0.8rem", fontFamily:"var(--font-display)" }}>Keluar</button>
-        </div>
-      </header>
-
-      <div style={{ maxWidth:"1280px", margin:"0 auto", padding:"1.5rem" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"0.5rem", marginBottom:"1.5rem" }}>
-          <div className="glow-active" style={{ width:"9px", height:"9px", borderRadius:"50%", background:"var(--color-brand-green)", flexShrink:0 }}/>
-          <span style={{ fontSize:"0.75rem", color:"var(--color-brand-muted)", textTransform:"uppercase" as const, letterSpacing:"0.1em", fontWeight:"600" }}>Auto-refresh {POLL/1000}s</span>
-          {lastUpdate && <span style={{ fontSize:"0.7rem", color:"var(--color-brand-border)" }}>· {fTime(lastUpdate.toISOString())}</span>}
-          <span style={{ marginLeft:"auto", fontSize:"0.75rem", color:"var(--color-brand-border)" }}>{new Date().toLocaleDateString("id-ID",{weekday:"long",day:"2-digit",month:"long",year:"numeric"})}</span>
-        </div>
-
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(240px, 1fr))", gap:"1rem", marginBottom:"1.5rem" }}>
-          <MetricCard label="Gross Volume Hari Ini" value={formatRupiah(metrics.gross)} color="var(--color-brand-green)" icon="💰"/>
-          <MetricCard label="Net Margin Vynalee" value={formatRupiah(metrics.netMargin)} color="var(--color-brand-accent-light)" icon="📈" sub="Setelah potong hak vendor"/>
-          <MetricCard label="Item Terjual" value={`${metrics.itemsSold} pcs`} color="#fbbf24" icon="📦"/>
-          <MetricCard label="Sisa Stok Tersedia" value={`${metrics.availableStock} pcs`} color="var(--color-brand-muted)" icon="🏷️"/>
-        </div>
-
-        <ShrinkageAlert/>
-
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1.25rem", marginTop:"1rem" }}>
-          <div style={{ background:"var(--color-brand-card)", border:"1px solid var(--color-brand-border)", borderRadius:"var(--radius-xl)", overflow:"hidden" }}>
-            <div style={{ padding:"1rem 1.25rem", borderBottom:"1px solid var(--color-brand-border)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <span style={{ fontWeight:"700", fontSize:"0.95rem" }}>📋 Activity Log</span>
-              <span style={{ fontSize:"0.75rem", color:"var(--color-brand-muted)" }}>25 terakhir</span>
-            </div>
-            <div style={{ maxHeight:"340px", overflowY:"auto" as const, padding:"0.75rem" }}>
-              {loading ? <div style={{ textAlign:"center" as const, padding:"2rem", color:"var(--color-brand-muted)" }}>Memuat...</div> :
-               logs.length === 0 ? <div style={{ textAlign:"center" as const, padding:"2rem", color:"var(--color-brand-muted)", fontSize:"0.9rem" }}>Belum ada transaksi hari ini</div> : (
-                <div style={{ display:"flex", flexDirection:"column" as const, gap:"0.4rem" }}>
-                  {logs.map((log, i) => (
-                    <div key={`${log.id}-${log.item_id}-${i}`} className="log-enter" style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"var(--color-brand-surface)", borderRadius:"8px", padding:"0.625rem 0.875rem" }}>
-                      <div style={{ display:"flex", gap:"0.625rem", alignItems:"center" }}>
-                        <div style={{ width:"30px", height:"30px", borderRadius:"6px", background:log.method==="CASH"?"rgba(16,185,129,0.15)":"rgba(124,58,237,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"0.875rem", flexShrink:0 }}>
-                          {log.method==="CASH"?"💵":"📱"}
-                        </div>
-                        <div>
-                          <div style={{ fontFamily:"var(--font-mono)", fontSize:"0.8rem", fontWeight:"700", color:"var(--color-brand-text)" }}>{log.item_id}</div>
-                          <div style={{ fontSize:"0.7rem", color:"var(--color-brand-muted)" }}>{log.cashier}</div>
-                        </div>
-                      </div>
-                      <div style={{ textAlign:"right" as const }}>
-                        <div style={{ fontWeight:"700", color:"var(--color-brand-green)", fontSize:"0.875rem", fontFamily:"var(--font-mono)" }}>{formatRupiah(log.price)}</div>
-                        <div style={{ fontSize:"0.7rem", color:"var(--color-brand-muted)" }}>{fTime(log.time)}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-          <VoidTracker/>
-        </div>
+    <div style={{ padding: "2rem", background: "var(--color-brand-bg)", minHeight: "100vh", color: "white" }}>
+      <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
+        <h1 style={{ fontSize: "2rem", fontWeight: "bold" }}>Settlement & Rekonsiliasi</h1>
+        <button onClick={() => router.push("/owner")} style={{ padding: "0.5rem 1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", cursor: "pointer" }}>← Dashboard</button>
       </div>
+
+      <div className="no-print" style={{ background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: "1px solid var(--color-brand-border)", marginBottom: "2rem", display: "flex", gap: "1rem" }}>
+        <select value={selectedEventId} onChange={e => setSelectedEventId(e.target.value)} style={{ flex: 1, padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", fontSize: "1.1rem" }}>
+          <option value="" disabled>-- Pilih Event untuk di-Settle --</option>
+          {events.map(ev => <option key={ev.id} value={ev.id}>{ev.name} {ev.is_closed ? "(CLOSED)" : "(ACTIVE)"}</option>)}
+        </select>
+        <button onClick={generateReport} disabled={loading} style={{ padding: "1rem 2rem", background: "var(--color-brand-accent)", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "1.1rem" }}>
+          {loading ? "Menghitung..." : "Generate Laporan"}
+        </button>
+        {summary && <button onClick={() => window.print()} style={{ padding: "1rem 2rem", background: "var(--color-brand-green)", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "1.1rem" }}>🖨️ Cetak</button>}
+      </div>
+
+      {summary && (
+        <div id="printable-area">
+          <div style={{ marginBottom: "2rem" }}>
+            <h2 style={{ fontSize: "1.5rem", color: "var(--color-brand-accent-light)", marginBottom: "1rem" }}>Ringkasan Eksekutif</h2>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+              <div style={{ background: "var(--color-brand-surface)", padding: "1.5rem", borderRadius: "12px", border: "1px solid var(--color-brand-border)" }}>
+                <p style={{ color: "var(--color-brand-muted)", fontSize: "0.85rem", textTransform: "uppercase" }}>Total Uang Masuk (Gross)</p>
+                <h3 style={{ fontSize: "2rem", color: "white" }}>Rp {summary.gross.toLocaleString("id-ID")}</h3>
+                <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>
+                  <span>CASH: Rp {summary.cashVolume.toLocaleString("id-ID")}</span>
+                  <span>QRIS: Rp {summary.qrisVolume.toLocaleString("id-ID")}</span>
+                </div>
+              </div>
+              <div style={{ background: "rgba(16, 185, 129, 0.1)", padding: "1.5rem", borderRadius: "12px", border: "1px solid var(--color-brand-green)" }}>
+                <p style={{ color: "var(--color-brand-green)", fontSize: "0.85rem", textTransform: "uppercase" }}>Pendapatan Bersih Vynalee</p>
+                <h3 style={{ fontSize: "2rem", color: "var(--color-brand-green)" }}>Rp {summary.vynaleeNetRevenue.toLocaleString("id-ID")}</h3>
+              </div>
+              <div style={{ background: "rgba(245, 158, 11, 0.1)", padding: "1.5rem", borderRadius: "12px", border: "1px solid var(--color-brand-yellow)" }}>
+                <p style={{ color: "var(--color-brand-yellow)", fontSize: "0.85rem", textTransform: "uppercase" }}>Total Hutang ke Vendor</p>
+                <h3 style={{ fontSize: "2rem", color: "var(--color-brand-yellow)" }}>Rp {summary.totalVendorPayout.toLocaleString("id-ID")}</h3>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h2 style={{ fontSize: "1.5rem", color: "var(--color-brand-accent-light)", marginBottom: "1rem" }}>Daftar Payout Vendor (Konsinyasi)</h2>
+            <div style={{ background: "var(--color-brand-surface)", borderRadius: "12px", border: "1px solid var(--color-brand-border)", overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                <thead>
+                  <tr style={{ background: "var(--color-brand-border)", color: "var(--color-brand-muted)", textTransform: "uppercase", fontSize: "0.85rem" }}>
+                    <th style={{ padding: "1rem" }}>Nama Vendor</th>
+                    <th style={{ padding: "1rem" }}>Item Terjual</th>
+                    <th style={{ padding: "1rem" }}>Total Penjualan</th>
+                    <th style={{ padding: "1rem" }}>Potongan Komisi Vynalee</th>
+                    <th style={{ padding: "1rem", color: "white" }}>Transfer ke Vendor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vendorPayouts.length === 0 ? (
+                    <tr><td colSpan={5} style={{ padding: "2rem", textAlign: "center", color: "var(--color-brand-muted)" }}>Tidak ada data penjualan vendor pada event ini.</td></tr>
+                  ) : vendorPayouts.map((v, idx) => (
+                    <tr key={idx} style={{ borderTop: "1px solid var(--color-brand-border)" }}>
+                      <td style={{ padding: "1rem", fontWeight: "bold" }}>{v.name}</td>
+                      <td style={{ padding: "1rem" }}>{v.items_sold} pcs</td>
+                      <td style={{ padding: "1rem" }}>Rp {v.gross_sales.toLocaleString("id-ID")}</td>
+                      <td style={{ padding: "1rem", color: "var(--color-brand-red)" }}>- Rp {v.commission_cut.toLocaleString("id-ID")}</td>
+                      <td style={{ padding: "1rem", color: "var(--color-brand-green)", fontWeight: "bold", fontSize: "1.1rem" }}>Rp {v.net_payout.toLocaleString("id-ID")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          body * { visibility: hidden; }
+          .no-print { display: none !important; }
+          #printable-area, #printable-area * { visibility: visible; }
+          #printable-area { position: absolute; left: 0; top: 0; width: 100%; color: black !important; }
+          #printable-area div, #printable-area p, #printable-area h2, #printable-area h3, #printable-area th, #printable-area td { color: black !important; border-color: #ccc !important; }
+        }
+      `}} />
     </div>
   );
 }

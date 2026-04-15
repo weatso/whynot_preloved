@@ -71,26 +71,40 @@ interface CartStore {
 
 async function pushTxnToSupabase(p: PendingTransaction): Promise<boolean> {
   try {
+    // 1. DAFTARKAN PELANGGAN DULU (Mencegah Foreign Key Error)
+    if (p.customerPhone) {
+      await supabase.from("customers").upsert(
+        { phone_number: p.customerPhone, last_visit: new Date().toISOString() },
+        { onConflict: "phone_number" }
+      );
+    }
+
     const codePct = p.discountPct / 100;
+    
+    // 2. INSERT TRANSAKSI
     const { data: txn, error: txnErr } = await supabase
       .from("transactions")
       .insert({
         total_amount: p.total,
         discount_applied: p.subtotal - p.total,
-        discount_code: p.discountCode,
-        discount_bearer: p.discountBearer,
+        discount_code: p.discountCode || null,
+        discount_bearer: p.discountBearer || null,
         payment_method: p.paymentMethod,
         cashier_name: p.cashierName,
         cashier_id: p.cashierId,
         customer_phone: p.customerPhone || null,
-        event_id: p.eventId,
+        event_id: p.eventId || null,
         sale_type: p.saleType,
       })
       .select()
       .single();
 
-    if (txnErr || !txn) return false;
+    if (txnErr || !txn) {
+      console.error("DB_TXN_ERROR:", txnErr);
+      return false;
+    }
 
+    // 3. INSERT PIVOT ITEM
     const pivotRows = p.items.map((item) => {
       const priceAtSale = codePct > 0 ? Math.round(item.price * (1 - codePct)) : item.price;
       return {
@@ -98,17 +112,22 @@ async function pushTxnToSupabase(p: PendingTransaction): Promise<boolean> {
         item_id: item.id,
         price_at_sale: priceAtSale,
         discount_applied: item.originalPrice - priceAtSale,
-        discount_code_used: p.discountCode,
-        discount_bearer: p.discountBearer,
+        discount_code_used: p.discountCode || null,
+        discount_bearer: p.discountBearer || null,
       };
     });
 
     const { error: pivotErr } = await supabase.from("transaction_items").insert(pivotRows);
-    if (pivotErr) return false;
+    if (pivotErr) {
+      console.error("DB_PIVOT_ERROR:", pivotErr);
+      return false;
+    }
 
+    // 4. UBAH STATUS BARANG
     await supabase.from("items").update({ status: "sold" }).in("id", p.items.map((i) => i.id));
     return true;
-  } catch {
+  } catch (err) {
+    console.error("DB_CATCH_ERROR:", err);
     return false;
   }
 }

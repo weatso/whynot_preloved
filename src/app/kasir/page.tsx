@@ -13,10 +13,13 @@ export default function KasirPage() {
 
   const [activeEvents, setActiveEvents] = useState<{ id: string; name: string }[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [inputValue, setInputValue] = useState("");
-  const [discountInput, setDiscountInput] = useState("");
   
+  // State Search & Modals
+  const [inputValue, setInputValue] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [discountInput, setDiscountInput] = useState("");
   const [scanMessage, setScanMessage] = useState<{ text: string; type: "error" | "success" } | null>(null);
+  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [waNumber, setWaNumber] = useState("");
   const [selectedPayment, setSelectedPayment] = useState<"CASH" | "QRIS" | null>(null);
@@ -37,23 +40,31 @@ export default function KasirPage() {
     return () => clearInterval(interval);
   }, [retryPending]);
 
-  // Autofocus Scanner
-  useEffect(() => {
-    if (!isModalOpen) {
-      const t = setTimeout(() => inputRef.current?.focus(), 100);
-      return () => clearTimeout(t);
-    }
-  }, [items, isModalOpen]);
-
   const fetchEvents = async () => {
     const { data } = await supabase.from("events").select("id, name").eq("is_active", true);
     if (data) setActiveEvents(data);
+  };
+
+  // LIVE SEARCH ENGINE (Bekerja 100% Offline via Cache)
+  const handleSearchChange = (val: string) => {
+    setInputValue(val);
+    if (val.trim().length === 0) {
+      setSearchResults([]);
+      return;
+    }
+    const query = val.toLowerCase();
+    const results = cachedItems.filter(i => 
+      i.status === "available" && 
+      (i.id.toLowerCase().includes(query) || i.name.toLowerCase().includes(query) || i.category.toLowerCase().includes(query))
+    ).slice(0, 8); // Batasi 8 item agar UI tidak tumpah
+    setSearchResults(results);
   };
 
   const handleScan = useCallback(async (rawId: string) => {
     const id = rawId.trim().toUpperCase();
     if (!id || !user) return;
     setInputValue("");
+    setSearchResults([]);
     setScanMessage(null);
 
     if (items.find((i) => i.id === id)) {
@@ -61,23 +72,20 @@ export default function KasirPage() {
       return;
     }
 
-    // OFFLINE-FIRST: Cari di cache lokal dulu
     let item = cachedItems.find((i) => i.id === id);
-    
-    // Jika tidak ada di lokal, coba paksa tembak server (siapa tahu item baru)
     if (!item) {
       try {
         const { data } = await supabase.from("items").select("*").eq("id", id).single();
         if (data) item = data as any;
-      } catch (e) { /* ignore */ }
+      } catch (e) {}
     }
 
     if (!item) {
-      setScanMessage({ text: `❌ ID ${id} tidak ditemukan`, type: "error" });
+      setScanMessage({ text: `❌ Barang ${id} tidak ditemukan`, type: "error" });
       return;
     }
     if (item.status !== "available") {
-      setScanMessage({ text: `❌ ${id} sudah terjual / tidak tersedia`, type: "error" });
+      setScanMessage({ text: `❌ ${item.name} sudah terjual`, type: "error" });
       return;
     }
 
@@ -94,7 +102,6 @@ export default function KasirPage() {
       vendorId: item.vendor_id
     });
     
-    // Optimistic update lokal
     supabase.from("items").update({ status: "in_cart" }).eq("id", id).then();
     setScanMessage({ text: `✓ ${item.name} ditambahkan`, type: "success" });
     setTimeout(() => setScanMessage(null), 2000);
@@ -111,14 +118,15 @@ export default function KasirPage() {
     if (isProcessing || !user || !selectedPayment) return;
     setIsProcessing(true);
 
-    const { success, offline } = await submitTransaction(selectedPayment, user.name, user.id, waNumber || null);
+    // Kirim waNumber, sistem store.ts akan otomatis Upsert Customer untuk cegah bug pending
+    const { success, offline } = await submitTransaction(selectedPayment, user.name, user.id, waNumber.trim() || null);
 
     setIsModalOpen(false);
     setSelectedPayment(null);
     setWaNumber("");
     setIsProcessing(false);
 
-    if (offline) alert("⚠️ Offline: Transaksi disimpan & akan disinkronisasi otomatis.");
+    if (offline) alert("⚠️ Offline: Transaksi disimpan & akan disinkronisasi otomatis saat internet kembali.");
     else setScanMessage({ text: `✅ Transaksi berhasil!`, type: "success" });
     
     setTimeout(() => setScanMessage(null), 3000);
@@ -128,13 +136,11 @@ export default function KasirPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--color-brand-bg)", display: "flex", flexDirection: "column" }}>
-      {/* Header */}
+      {/* HEADER */}
       <header style={{ background: "var(--color-brand-surface)", borderBottom: "1px solid var(--color-brand-border)", padding: "1rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <span style={{ fontWeight: "700", color: "var(--color-brand-text)", fontSize: "1.2rem" }}>🏷️ WNP POS Terminal</span>
-        </div>
+        <span style={{ fontWeight: "700", color: "var(--color-brand-text)", fontSize: "1.2rem" }}>🏷️ WNP POS</span>
         
-        {/* EVENT SELECTOR (WAJIB) */}
+        {/* EVENT SELECTOR */}
         <select 
           value={eventSession?.eventId || "daily"}
           onChange={(e) => {
@@ -156,21 +162,40 @@ export default function KasirPage() {
 
       <div style={{ flex: 1, display: "flex", padding: "1rem", gap: "1rem", overflow: "hidden" }}>
         
-        {/* KIRI: Input Scanner & Keranjang */}
+        {/* KIRI: AREA SCAN & SEARCH */}
         <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: "1rem" }}>
-          {/* Scanner */}
-          <div style={{ background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: `2px solid ${scanMessage?.type === "error" ? "var(--color-brand-red)" : scanMessage?.type === "success" ? "var(--color-brand-green)" : "var(--color-brand-accent)"}` }}>
-            <p style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem", textTransform: "uppercase", marginBottom: "0.5rem", fontWeight: "bold" }}>Scan / Ketik Barcode</p>
-            <input 
-              ref={inputRef} type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value.toUpperCase())}
-              onKeyDown={(e) => { if (e.key === "Enter") handleScan(inputValue); }}
-              placeholder="PRL-..."
-              style={{ width: "100%", background: "transparent", border: "none", fontSize: "2rem", color: "white", outline: "none", fontWeight: "bold", fontFamily: "var(--font-mono)" }} 
-            />
+          <div style={{ background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: `2px solid ${scanMessage?.type === "error" ? "var(--color-brand-red)" : scanMessage?.type === "success" ? "var(--color-brand-green)" : "var(--color-brand-accent)"}`, position: "relative" }}>
+            <p style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem", textTransform: "uppercase", marginBottom: "0.5rem", fontWeight: "bold" }}>Cari Nama / Scan Barcode</p>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <input 
+                ref={inputRef} type="text" value={inputValue} 
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleScan(inputValue); }}
+                placeholder="Ketik Baju / PRL-..."
+                style={{ flex: 1, background: "transparent", border: "none", fontSize: "1.8rem", color: "white", outline: "none", fontWeight: "bold", fontFamily: "var(--font-mono)" }} 
+              />
+              <button onClick={() => handleScan(inputValue)} style={{ background: "var(--color-brand-accent)", color: "white", border: "none", padding: "0.8rem 1.5rem", borderRadius: "8px", fontWeight: "bold", cursor: "pointer" }}>Tambah</button>
+            </div>
+            
+            {/* DROPDOWN SEARCH RESULT */}
+            {searchResults.length > 0 && (
+              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "var(--color-brand-surface)", border: "1px solid var(--color-brand-border)", borderRadius: "0 0 12px 12px", zIndex: 50, maxHeight: "300px", overflowY: "auto", boxShadow: "0 10px 30px rgba(0,0,0,0.5)" }}>
+                {searchResults.map(res => (
+                  <div key={res.id} onClick={() => handleScan(res.id)} style={{ padding: "1rem", borderBottom: "1px solid var(--color-brand-border)", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: "bold", color: "white", fontSize: "1.1rem" }}>{res.name}</div>
+                      <div style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)" }}>{res.category} • ID: {res.id}</div>
+                    </div>
+                    <div style={{ color: "var(--color-brand-green)", fontWeight: "bold" }}>Rp {res.price.toLocaleString("id-ID")}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {scanMessage && <p style={{ color: scanMessage.type === "error" ? "var(--color-brand-red)" : "var(--color-brand-green)", marginTop: "0.5rem", fontWeight: "bold" }}>{scanMessage.text}</p>}
           </div>
 
-          {/* Cart List */}
+          {/* KERANJANG */}
           <div style={{ flex: 1, background: "var(--color-brand-card)", borderRadius: "var(--radius-xl)", overflowY: "auto", border: "1px solid var(--color-brand-border)" }}>
             {items.length === 0 ? (
               <div style={{ display: "flex", height: "100%", alignItems: "center", justifyContent: "center", color: "var(--color-brand-muted)" }}>Keranjang Kosong</div>
@@ -178,17 +203,18 @@ export default function KasirPage() {
               items.map((item) => (
                 <div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "1rem", borderBottom: "1px solid var(--color-brand-border)", alignItems: "center" }}>
                   <div>
-                    <div style={{ color: "white", fontWeight: "bold" }}>{item.name} <span style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem" }}>({item.id})</span></div>
+                    <div style={{ color: "white", fontWeight: "bold" }}>{item.name}</div>
+                    <div style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem" }}>ID: {item.id}</div>
                     <div style={{ color: "var(--color-brand-green)", fontWeight: "bold", marginTop: "0.2rem" }}>Rp {item.price.toLocaleString("id-ID")}</div>
                   </div>
-                  <button onClick={() => voidCartItem(item.id, user.name, user.id, "Kasir membatalkan item")} style={{ background: "rgba(239,68,68,0.1)", color: "var(--color-brand-red)", border: "none", padding: "0.5rem 1rem", borderRadius: "8px", fontWeight: "bold", cursor: "pointer" }}>X</button>
+                  <button onClick={() => voidCartItem(item.id, user.name, user.id, "Dihapus dari kasir")} style={{ background: "rgba(239,68,68,0.1)", color: "var(--color-brand-red)", border: "none", padding: "0.8rem 1.2rem", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "1.2rem" }}>X</button>
                 </div>
               ))
             )}
           </div>
         </div>
 
-        {/* KANAN: Checkout & Diskon */}
+        {/* KANAN: AREA BAYAR */}
         <div style={{ flex: 1, background: "var(--color-brand-card)", borderRadius: "var(--radius-xl)", padding: "1.5rem", border: "1px solid var(--color-brand-border)", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
           <div>
             <h2 style={{ color: "var(--color-brand-muted)", textTransform: "uppercase", fontSize: "0.9rem", marginBottom: "1.5rem" }}>Ringkasan</h2>
@@ -198,7 +224,6 @@ export default function KasirPage() {
               <span>Rp {subtotal.toLocaleString("id-ID")}</span>
             </div>
 
-            {/* KODE DISKON SECTION */}
             <div style={{ marginBottom: "1.5rem", borderTop: "1px solid var(--color-brand-border)", paddingTop: "1rem" }}>
               {appliedDiscount ? (
                 <div style={{ background: "rgba(16,185,129,0.1)", padding: "1rem", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -210,7 +235,7 @@ export default function KasirPage() {
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <input type="text" value={discountInput} onChange={e => setDiscountInput(e.target.value)} placeholder="Masukkan Kode Diskon" style={{ flex: 1, padding: "0.8rem", borderRadius: "8px", background: "var(--color-brand-bg)", border: "1px solid var(--color-brand-border)", color: "white", outline: "none" }} />
+                  <input type="text" value={discountInput} onChange={e => setDiscountInput(e.target.value.toUpperCase())} placeholder="Kode Diskon..." style={{ flex: 1, padding: "0.8rem", borderRadius: "8px", background: "var(--color-brand-bg)", border: "1px solid var(--color-brand-border)", color: "white", outline: "none" }} />
                   <button onClick={handleApplyDiscount} style={{ padding: "0.8rem 1.2rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", cursor: "pointer" }}>Pakai</button>
                 </div>
               )}
@@ -228,23 +253,24 @@ export default function KasirPage() {
         </div>
       </div>
 
-      {/* Modal Pembayaran */}
+      {/* MODAL BAYAR */}
       {isModalOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-          <div style={{ background: "var(--color-brand-card)", padding: "2rem", borderRadius: "var(--radius-2xl)", width: "100%", maxWidth: "400px", textAlign: "center" }}>
-            <h2 style={{ color: "white", marginBottom: "1.5rem" }}>Pilih Metode Pembayaran</h2>
-            <div style={{ fontSize: "2.5rem", color: "var(--color-brand-green)", fontWeight: "bold", marginBottom: "2rem" }}>Rp {grandTotal.toLocaleString("id-ID")}</div>
+          <div style={{ background: "var(--color-brand-card)", padding: "2.5rem", borderRadius: "var(--radius-2xl)", width: "100%", maxWidth: "450px", textAlign: "center", border: "1px solid var(--color-brand-border)" }}>
+            <h2 style={{ color: "white", marginBottom: "0.5rem" }}>Pilih Pembayaran</h2>
+            <div style={{ fontSize: "2.8rem", color: "var(--color-brand-green)", fontWeight: "bold", marginBottom: "2rem", fontFamily: "var(--font-mono)" }}>Rp {grandTotal.toLocaleString("id-ID")}</div>
             
             <div style={{ marginBottom: "1.5rem" }}>
-              <input type="text" value={waNumber} onChange={e => setWaNumber(e.target.value.replace(/\D/g, ""))} placeholder="Nomor WA Pelanggan (Opsional)" style={{ width: "100%", padding: "1rem", borderRadius: "8px", background: "var(--color-brand-bg)", border: "1px solid var(--color-brand-border)", color: "white", outline: "none", textAlign: "center" }} />
+              <input type="text" value={waNumber} onChange={e => setWaNumber(e.target.value.replace(/\D/g, ""))} placeholder="Nomor WA Pelanggan (0812...)" style={{ width: "100%", padding: "1.2rem", borderRadius: "12px", background: "var(--color-brand-bg)", border: "2px solid var(--color-brand-border)", color: "white", outline: "none", textAlign: "center", fontSize: "1.1rem" }} />
+              <p style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem", marginTop: "0.5rem" }}>Isi untuk kirim struk digital (Opsional)</p>
             </div>
 
             <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
-              <button onClick={() => { setSelectedPayment("CASH"); handleFinalPayment(); }} style={{ flex: 1, padding: "1.5rem", background: "var(--color-brand-green)", border: "none", borderRadius: "12px", color: "white", fontSize: "1.2rem", fontWeight: "bold", cursor: "pointer" }}>CASH</button>
-              <button onClick={() => { setSelectedPayment("QRIS"); handleFinalPayment(); }} style={{ flex: 1, padding: "1.5rem", background: "var(--color-brand-accent)", border: "none", borderRadius: "12px", color: "white", fontSize: "1.2rem", fontWeight: "bold", cursor: "pointer" }}>QRIS</button>
+              <button disabled={isProcessing} onClick={() => { setSelectedPayment("CASH"); handleFinalPayment(); }} style={{ flex: 1, padding: "1.5rem", background: "var(--color-brand-green)", border: "none", borderRadius: "12px", color: "white", fontSize: "1.2rem", fontWeight: "bold", cursor: "pointer" }}>CASH</button>
+              <button disabled={isProcessing} onClick={() => { setSelectedPayment("QRIS"); handleFinalPayment(); }} style={{ flex: 1, padding: "1.5rem", background: "var(--color-brand-accent)", border: "none", borderRadius: "12px", color: "white", fontSize: "1.2rem", fontWeight: "bold", cursor: "pointer" }}>QRIS</button>
             </div>
             
-            <button onClick={() => setIsModalOpen(false)} style={{ width: "100%", padding: "1rem", background: "transparent", color: "var(--color-brand-muted)", border: "none", cursor: "pointer" }}>Batal</button>
+            <button disabled={isProcessing} onClick={() => setIsModalOpen(false)} style={{ width: "100%", padding: "1rem", background: "transparent", color: "var(--color-brand-red)", border: "none", cursor: "pointer", fontWeight: "bold" }}>Batal Kembali</button>
           </div>
         </div>
       )}
