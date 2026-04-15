@@ -8,11 +8,13 @@
     "start": "next start"
   },
   "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
     "@supabase/supabase-js": "^2.103.0",
     "@tailwindcss/postcss": "^4.2.2",
     "next": "16.2.3",
     "next-pwa": "^5.6.0",
     "react": "19.2.4",
+    "react-barcode": "^1.6.1",
     "react-dom": "19.2.4",
     "tailwindcss": "^4.2.2",
     "zustand": "^5.0.12"

@@ -1,14 +1,19 @@
 {
   "name": "Why Not Preloved POS",
   "short_name": "WNP POS",
-  "description": "Sistem POS untuk event preloved Why Not Preloved",
-  "start_url": "/login",
+  "description": "Sistem Kasir Operasional Event Preloved",
+  "theme_color": "#7c3aed",
+  "background_color": "#0a0a0f",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0a0a0f",
-  "theme_color": "#7c3aed",
+  "scope": "/",
+  "start_url": "/",
   "icons": [
-    { "src": "/logo.jpg", "sizes": "192x192", "type": "image/jpeg", "purpose": "any" },
-    { "src": "/logo.jpg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any" }
+    {
+      "src": "/logo.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
   ]
 }
