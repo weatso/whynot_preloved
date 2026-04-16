@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/lib/authStore";
 import { useRouter } from "next/navigation";
+import { PageHeader } from "@/components/PageHeader";
 
 export default function UsersPage() {
   const router = useRouter();
@@ -28,20 +29,9 @@ export default function UsersPage() {
     e.preventDefault();
     if (!username || !pin || !name) return alert("Semua field wajib diisi!");
     if (pin.length !== 4) return alert("PIN harus 4 digit angka!");
-    
-    const { error } = await supabase.from("users").insert({
-      username: username.toLowerCase().trim(),
-      pin,
-      name,
-      role,
-      is_active: true
-    });
-
+    const { error } = await supabase.from("users").insert({ username: username.toLowerCase().trim(), pin, name, role, is_active: true });
     if (error) alert("Username sudah digunakan.");
-    else {
-      setUsername(""); setPin(""); setName(""); setRole("kasir");
-      fetchUsers();
-    }
+    else { setUsername(""); setPin(""); setName(""); setRole("kasir"); fetchUsers(); }
   };
 
   const toggleStatus = async (id: string, currentStatus: boolean, userRole: string) => {
@@ -52,46 +42,82 @@ export default function UsersPage() {
 
   if (!user) return null;
 
+  const roleBadge = (r: string) => {
+    if (r === "owner") return "wnp-badge-purple";
+    if (r === "admin") return "wnp-badge-yellow";
+    return "wnp-badge-green";
+  };
+
   return (
-    <div style={{ padding: "2rem", background: "var(--color-brand-bg)", minHeight: "100vh", color: "white" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
-        <h1 style={{ fontSize: "2rem", fontWeight: "bold" }}>Master Data Akun</h1>
-        <button onClick={() => router.push("/owner")} style={{ padding: "0.5rem 1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", cursor: "pointer" }}>← Dashboard</button>
-      </div>
+    <div className="wnp-page">
+      <PageHeader title="Master Data Akun" />
 
-      <div style={{ display: "flex", gap: "2rem", alignItems: "flex-start" }}>
-        <div style={{ flex: 1, background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: "1px solid var(--color-brand-border)" }}>
-          <h2 style={{ fontSize: "1.2rem", marginBottom: "1.5rem", color: "var(--color-brand-accent-light)" }}>+ Buat Akun Baru</h2>
-          <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            <input type="text" placeholder="Username (tanpa spasi)" value={username} onChange={e => setUsername(e.target.value.toLowerCase())} style={{ padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none" }} />
-            <input type="text" placeholder="Nama Lengkap Kasir" value={name} onChange={e => setName(e.target.value)} style={{ padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none" }} />
-            <input type="text" placeholder="PIN Rahasia (4 Digit)" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} style={{ padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", fontFamily: "var(--font-mono)" }} />
-            
-            <select value={role} onChange={e => setRole(e.target.value)} style={{ padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none" }}>
-              <option value="kasir">Kasir (Hanya akses POS)</option>
-              <option value="admin">Admin (Supervisor Lapangan)</option>
-            </select>
+      <div className="wnp-page-content">
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
 
-            <button type="submit" style={{ padding: "1rem", background: "var(--color-brand-accent)", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", marginTop: "0.5rem" }}>Buat Akun</button>
-          </form>
-        </div>
-
-        <div style={{ flex: 2, background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: "1px solid var(--color-brand-border)" }}>
-          <h2 style={{ fontSize: "1.2rem", marginBottom: "1.5rem" }}>Daftar Pengguna Sistem</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            {users.map(u => (
-              <div key={u.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem", background: "var(--color-brand-surface)", borderRadius: "8px", borderLeft: `4px solid ${u.is_active ? "var(--color-brand-green)" : "var(--color-brand-red)"}` }}>
-                <div>
-                  <h3 style={{ fontWeight: "bold", fontSize: "1.1rem" }}>{u.name} <span style={{ color: "var(--color-brand-muted)", fontSize: "0.9rem" }}>({u.username})</span></h3>
-                  <p style={{ color: "var(--color-brand-accent-light)", fontSize: "0.85rem", marginTop: "0.2rem", textTransform: "uppercase", fontWeight: "bold" }}>Role: {u.role}</p>
-                </div>
-                {u.role !== "owner" && (
-                  <button onClick={() => toggleStatus(u.id, u.is_active, u.role)} style={{ padding: "0.5rem 1rem", background: u.is_active ? "var(--color-brand-surface)" : "var(--color-brand-green)", border: "1px solid var(--color-brand-border)", color: "white", borderRadius: "6px", cursor: "pointer" }}>
-                    {u.is_active ? "Nonaktifkan" : "Aktifkan"}
-                  </button>
-                )}
+          {/* Form Buat Akun */}
+          <div className="wnp-card">
+            <h2 style={{ fontSize: "1.1rem", marginBottom: "1.25rem", color: "var(--color-brand-accent-light)", fontWeight: "bold" }}>
+              + Buat Akun Baru
+            </h2>
+            <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                <input type="text" placeholder="Username (tanpa spasi)" value={username}
+                  onChange={e => setUsername(e.target.value.toLowerCase())} className="wnp-input" />
+                <input type="text" placeholder="PIN 4 Digit" maxLength={4} value={pin}
+                  onChange={e => setPin(e.target.value.replace(/\D/g, ""))} className="wnp-input"
+                  style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.2em" }} />
               </div>
-            ))}
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.75rem" }}>
+                <input type="text" placeholder="Nama Lengkap" value={name}
+                  onChange={e => setName(e.target.value)} className="wnp-input" />
+                <select value={role} onChange={e => setRole(e.target.value)} className="wnp-input">
+                  <option value="kasir">Kasir</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <button type="submit" className="wnp-btn wnp-btn-primary" style={{ marginTop: "0.25rem" }}>Buat Akun</button>
+            </form>
+          </div>
+
+          {/* Daftar Pengguna */}
+          <div className="wnp-card">
+            <h2 style={{ fontSize: "1.1rem", marginBottom: "1.25rem", fontWeight: "bold" }}>
+              Daftar Pengguna ({users.length})
+            </h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              {users.length === 0 && (
+                <p style={{ color: "var(--color-brand-muted)", textAlign: "center", padding: "1.5rem" }}>Belum ada pengguna.</p>
+              )}
+              {users.map(u => (
+                <div key={u.id} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "0.85rem 1rem", background: "var(--color-brand-surface)", borderRadius: "8px",
+                  borderLeft: `4px solid ${u.is_active ? "var(--color-brand-green)" : "var(--color-brand-red)"}`,
+                  gap: "0.75rem", flexWrap: "wrap",
+                }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <h3 style={{ fontWeight: "bold", fontSize: "1rem" }}>
+                      {u.name}{" "}
+                      <span style={{ color: "var(--color-brand-muted)", fontSize: "0.85rem" }}>(@{u.username})</span>
+                    </h3>
+                    <div style={{ marginTop: "0.25rem" }}>
+                      <span className={`wnp-badge ${roleBadge(u.role)}`} style={{ textTransform: "uppercase" }}>{u.role}</span>
+                      {!u.is_active && <span className="wnp-badge wnp-badge-red" style={{ marginLeft: "0.4rem" }}>NONAKTIF</span>}
+                    </div>
+                  </div>
+                  {u.role !== "owner" && (
+                    <button
+                      onClick={() => toggleStatus(u.id, u.is_active, u.role)}
+                      className={`wnp-btn ${u.is_active ? "wnp-btn-danger" : "wnp-btn-success"}`}
+                      style={{ padding: "0.4rem 0.85rem", fontSize: "0.85rem", flexShrink: 0 }}
+                    >
+                      {u.is_active ? "Nonaktifkan" : "Aktifkan"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
