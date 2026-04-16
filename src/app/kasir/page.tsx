@@ -10,6 +10,18 @@ import dynamic from "next/dynamic";
 
 const BarcodeScanner = dynamic(() => import("@/components/BarcodeScanner"), { ssr: false });
 
+// Hook untuk detect apakah layar mobile (< 768px)
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return isMobile;
+}
+
 export default function KasirPage() {
   const router = useRouter();
   const { user, logout } = useAuthStore();
@@ -20,6 +32,8 @@ export default function KasirPage() {
     syncItemCache, cachedItems, retryPending,
   } = useCartStore();
 
+  const isMobile = useIsMobile();
+
   const [activeEvents, setActiveEvents] = useState<{ id: string; name: string }[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const [inputValue, setInputValue] = useState("");
@@ -27,7 +41,7 @@ export default function KasirPage() {
   const [discountInput, setDiscountInput] = useState("");
   const [scanMessage, setScanMessage] = useState<{ text: string; type: "error" | "success" } | null>(null);
   const [showScanner, setShowScanner] = useState(false);
-  const [showCart, setShowCart] = useState(false); // Mobile: toggle keranjang
+  const [activeTab, setActiveTab] = useState<"scan" | "cart">("scan"); // Mobile tab
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [waNumber, setWaNumber] = useState("");
@@ -101,10 +115,12 @@ export default function KasirPage() {
 
     supabase.from("items").update({ status: "in_cart" }).eq("id", item.id).then();
     setScanMessage({ text: `✓ ${item.name} ditambahkan`, type: "success" });
-    // On mobile, auto-show cart tab after successful scan
-    setShowCart(true);
-    setTimeout(() => { setScanMessage(null); setShowCart(false); }, 2500);
-  }, [items, cachedItems, addItem, user]);
+    if (isMobile) setActiveTab("cart");
+    setTimeout(() => {
+      setScanMessage(null);
+      if (isMobile) setActiveTab("scan");
+    }, 2500);
+  }, [items, cachedItems, addItem, user, isMobile]);
 
   const handleApplyDiscount = async () => {
     if (!discountInput.trim()) return;
@@ -133,12 +149,250 @@ export default function KasirPage() {
     ? "var(--color-brand-green)"
     : "var(--color-brand-accent)";
 
+  // ─── PANEL KIRI: Area Scan + List Keranjang ───────────────────────────────
+  const ScanPanel = (
+    <div style={{
+      flex: 2, display: "flex", flexDirection: "column", gap: "1rem",
+      padding: "1rem", overflow: "hidden", minWidth: 0,
+    }}>
+      {/* Input Scan */}
+      <div style={{
+        background: "var(--color-brand-card)", padding: "1rem",
+        borderRadius: "var(--radius-xl)", border: `2px solid ${scanBorderColor}`,
+        position: "relative", transition: "border-color 0.3s", flexShrink: 0,
+      }}>
+        <p style={{ color: "var(--color-brand-muted)", fontSize: "0.7rem", textTransform: "uppercase", marginBottom: "0.5rem", fontWeight: "bold", letterSpacing: "0.05em" }}>
+          Cari Nama / Scan Barcode
+        </p>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input
+            ref={inputRef} type="text" value={inputValue}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleScan(inputValue); }}
+            placeholder="Ketik nama / ID barang..."
+            style={{
+              flex: 1, background: "transparent", border: "none",
+              fontSize: isMobile ? "1.1rem" : "1.5rem",
+              color: "var(--color-brand-text)", outline: "none",
+              fontWeight: "bold", fontFamily: "var(--font-mono)", minWidth: 0,
+            }}
+            autoComplete="off"
+          />
+          <button
+            onClick={() => setShowScanner(true)}
+            title="Scan dengan kamera"
+            style={{
+              background: "var(--color-brand-surface)",
+              color: "var(--color-brand-accent-light)",
+              border: "1px solid var(--color-brand-border)",
+              padding: "0.5rem 0.7rem", borderRadius: "8px",
+              cursor: "pointer", fontSize: "1.1rem", flexShrink: 0,
+            }}
+          >
+            📷
+          </button>
+          <button
+            onClick={() => handleScan(inputValue)}
+            style={{
+              background: "var(--color-brand-accent)", color: "white", border: "none",
+              padding: "0.5rem 0.85rem", borderRadius: "8px", fontWeight: "bold",
+              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, fontSize: "0.9rem",
+            }}
+          >
+            Tambah
+          </button>
+        </div>
+
+        {/* Dropdown hasil pencarian */}
+        {searchResults.length > 0 && (
+          <div style={{
+            position: "absolute", top: "100%", left: 0, right: 0,
+            background: "var(--color-brand-surface)",
+            border: "1px solid var(--color-brand-border)",
+            borderRadius: "0 0 12px 12px",
+            zIndex: 50, maxHeight: "260px", overflowY: "auto",
+            boxShadow: "0 10px 30px var(--color-brand-shadow)",
+          }}>
+            {searchResults.map(res => (
+              <div
+                key={res.id} onClick={() => handleScan(res.id)}
+                style={{
+                  padding: "0.75rem 1rem", borderBottom: "1px solid var(--color-brand-border)",
+                  cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: "bold", color: "var(--color-brand-text)", fontSize: "0.95rem" }}>{res.name}</div>
+                  <div style={{ fontSize: "0.7rem", color: "var(--color-brand-muted)" }}>{res.category} • {res.id}</div>
+                </div>
+                <div style={{ color: "var(--color-brand-green)", fontWeight: "bold", whiteSpace: "nowrap", marginLeft: "1rem", fontSize: "0.9rem" }}>
+                  Rp {res.price.toLocaleString("id-ID")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {scanMessage && (
+          <p style={{ color: scanMessage.type === "error" ? "var(--color-brand-red)" : "var(--color-brand-green)", marginTop: "0.4rem", fontWeight: "bold", fontSize: "0.85rem" }}>
+            {scanMessage.text}
+          </p>
+        )}
+      </div>
+
+      {/* List Keranjang */}
+      <div style={{
+        flex: 1, background: "var(--color-brand-card)",
+        borderRadius: "var(--radius-xl)", overflowY: "auto",
+        border: "1px solid var(--color-brand-border)",
+      }}>
+        {items.length === 0 ? (
+          <div style={{ display: "flex", height: "100%", minHeight: "120px", alignItems: "center", justifyContent: "center", color: "var(--color-brand-muted)", flexDirection: "column", gap: "0.5rem" }}>
+            <span style={{ fontSize: "2rem" }}>🛒</span>
+            <span style={{ fontSize: "0.9rem" }}>Keranjang kosong</span>
+          </div>
+        ) : items.map((item) => (
+          <div key={item.id} style={{
+            display: "flex", justifyContent: "space-between",
+            padding: "0.75rem 1rem", borderBottom: "1px solid var(--color-brand-border)",
+            alignItems: "center", gap: "0.75rem",
+          }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ color: "var(--color-brand-text)", fontWeight: "bold", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.95rem" }}>
+                {item.name}
+              </div>
+              <div style={{ color: "var(--color-brand-muted)", fontSize: "0.7rem" }}>{item.id} • {item.category}</div>
+              <div style={{ color: "var(--color-brand-green)", fontWeight: "bold", marginTop: "0.1rem", fontSize: "0.9rem" }}>
+                Rp {item.price.toLocaleString("id-ID")}
+                {item.itemDiscountPct > 0 && (
+                  <span style={{ fontSize: "0.7rem", color: "var(--color-brand-muted)", marginLeft: "0.4rem", textDecoration: "line-through" }}>
+                    {item.originalPrice.toLocaleString("id-ID")}
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => voidCartItem(item.id, user.name, user.id, "Dihapus dari kasir")}
+              style={{
+                background: "rgba(239,68,68,0.1)", color: "var(--color-brand-red)", border: "none",
+                padding: "0.4rem 0.7rem", borderRadius: "8px", fontWeight: "bold", cursor: "pointer",
+                fontSize: "0.9rem", flexShrink: 0,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ─── PANEL KANAN: Ringkasan + Bayar ──────────────────────────────────────
+  const SummaryPanel = (
+    <div style={{
+      width: isMobile ? "100%" : "300px",
+      flexShrink: 0,
+      background: "var(--color-brand-card)",
+      borderLeft: isMobile ? "none" : "1px solid var(--color-brand-border)",
+      borderTop: isMobile ? "1px solid var(--color-brand-border)" : "none",
+      padding: "1rem",
+      display: "flex", flexDirection: "column", justifyContent: "space-between",
+      overflowY: "auto",
+    }}>
+      <div>
+        <h2 style={{ color: "var(--color-brand-muted)", textTransform: "uppercase", fontSize: "0.75rem", letterSpacing: "0.08em", marginBottom: "1rem", fontWeight: "bold" }}>
+          Ringkasan
+        </h2>
+
+        <div style={{ display: "flex", justifyContent: "space-between", color: "var(--color-brand-text)", marginBottom: "0.85rem", fontSize: "0.95rem" }}>
+          <span>Subtotal ({items.length} item)</span>
+          <span>Rp {subtotal.toLocaleString("id-ID")}</span>
+        </div>
+
+        {/* Diskon */}
+        <div style={{ marginBottom: "1rem", borderTop: "1px solid var(--color-brand-border)", paddingTop: "0.85rem" }}>
+          {appliedDiscount ? (
+            <div style={{ background: "rgba(16,185,129,0.08)", padding: "0.75rem", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid rgba(16,185,129,0.2)" }}>
+              <div>
+                <span style={{ color: "var(--color-brand-green)", fontWeight: "bold", display: "block", fontSize: "0.85rem" }}>
+                  Diskon {appliedDiscount.code} ({appliedDiscount.pct}%)
+                </span>
+                <span style={{ color: "var(--color-brand-green)", fontSize: "0.8rem" }}>
+                  - Rp {discountAmount.toLocaleString("id-ID")}
+                </span>
+              </div>
+              <button onClick={clearDiscount} style={{ background: "none", border: "none", color: "var(--color-brand-red)", fontWeight: "bold", cursor: "pointer", fontSize: "1rem" }}>✕</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <input
+                type="text" value={discountInput}
+                onChange={e => setDiscountInput(e.target.value.toUpperCase())}
+                onKeyDown={e => { if (e.key === "Enter") handleApplyDiscount(); }}
+                placeholder="Kode Diskon..."
+                className="wnp-input"
+                style={{ flex: 1, padding: "0.6rem 0.75rem" }}
+              />
+              <button onClick={handleApplyDiscount} className="wnp-btn wnp-btn-ghost" style={{ padding: "0.6rem 0.85rem", fontSize: "0.85rem" }}>Pakai</button>
+            </div>
+          )}
+        </div>
+
+        {/* Grand Total */}
+        <div style={{
+          display: "flex", justifyContent: "space-between",
+          color: "var(--color-brand-accent-light)", fontSize: "1.3rem", fontWeight: "bold",
+          borderTop: "1px solid var(--color-brand-border)", paddingTop: "0.85rem", marginBottom: "0.85rem",
+        }}>
+          <span>TOTAL</span>
+          <span>Rp {grandTotal.toLocaleString("id-ID")}</span>
+        </div>
+      </div>
+
+      {/* Tombol Aksi */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+        <button
+          onClick={() => { if (window.confirm("🚨 Kosongkan semua barang di keranjang?")) clearCart(user.name, user.id); }}
+          disabled={items.length === 0}
+          style={{
+            width: "100%", padding: "0.75rem", borderRadius: "10px",
+            background: "transparent", color: "var(--color-brand-red)",
+            border: "1px solid var(--color-brand-red)",
+            fontWeight: "bold", cursor: items.length === 0 ? "not-allowed" : "pointer",
+            opacity: items.length === 0 ? 0.4 : 1, fontSize: "0.9rem",
+          }}
+        >
+          🗑️ Kosongkan
+        </button>
+
+        <button
+          disabled={items.length === 0}
+          onClick={() => setIsModalOpen(true)}
+          style={{
+            width: "100%", padding: "1rem", borderRadius: "12px",
+            background: items.length === 0 ? "var(--color-brand-surface)" : "var(--color-brand-green-dark)",
+            color: items.length === 0 ? "var(--color-brand-muted)" : "white",
+            fontSize: "1.2rem", fontWeight: "bold", border: "none",
+            cursor: items.length === 0 ? "not-allowed" : "pointer", transition: "all 0.2s",
+          }}
+        >
+          💳 BAYAR
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="wnp-page" style={{ height: "100dvh", overflow: "hidden" }}>
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: "var(--color-brand-bg)", color: "var(--color-brand-text)", overflow: "hidden" }}>
 
       {/* ===== HEADER ===== */}
-      <header className="wnp-header">
-        <span style={{ fontWeight: 700, color: "var(--color-brand-accent-light)", fontSize: "1.1rem", flexShrink: 0 }}>
+      <header style={{
+        padding: "0.6rem 1rem", background: "var(--color-brand-surface)",
+        borderBottom: "1px solid var(--color-brand-border)",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: "0.5rem", flexShrink: 0, flexWrap: "nowrap",
+      }}>
+        <span style={{ fontWeight: 700, color: "var(--color-brand-accent-light)", fontSize: "1rem", flexShrink: 0 }}>
           🏷️ WNP POS
         </span>
 
@@ -150,326 +404,103 @@ export default function KasirPage() {
             else
               setEventSession({ eventId: e.target.value, eventName: e.target.options[e.target.selectedIndex].text, saleType: "event" });
           }}
-          className="wnp-input"
-          style={{ maxWidth: "200px", padding: "0.45rem 0.8rem", fontSize: "0.85rem" }}
+          style={{
+            background: "var(--color-brand-bg)", color: "var(--color-brand-accent-light)",
+            border: "1px solid var(--color-brand-accent)", padding: "0.35rem 0.6rem",
+            borderRadius: "8px", outline: "none", fontWeight: "bold",
+            fontSize: "0.8rem", maxWidth: isMobile ? "130px" : "200px", flex: "0 1 auto",
+          }}
         >
-          <option value="daily">-- Penjualan Harian --</option>
+          <option value="daily">{isMobile ? "Harian" : "-- Penjualan Harian --"}</option>
           {activeEvents.map(ev => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
         </select>
 
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "0.4rem", alignItems: "center", flexShrink: 0 }}>
           <OfflineIndicator />
           <ThemeToggle />
-          <span style={{ color: "var(--color-brand-muted)", fontSize: "0.85rem", display: "none" }}
-            className="md:inline">👤 @{user.username}</span>
+          {!isMobile && (
+            <span style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem" }}>👤 @{user.username}</span>
+          )}
           <button
             onClick={() => { logout(); router.replace("/login"); }}
-            className="wnp-btn wnp-btn-ghost"
-            style={{ padding: "0.4rem 0.75rem", fontSize: "0.85rem" }}
+            style={{
+              background: "transparent", border: "1px solid var(--color-brand-border)",
+              padding: "0.35rem 0.6rem", borderRadius: "6px", color: "var(--color-brand-text)",
+              cursor: "pointer", fontWeight: "bold", fontSize: "0.8rem",
+            }}
           >
-            Keluar
+            {isMobile ? "↩" : "Keluar"}
           </button>
         </div>
       </header>
 
-      {/* ===== MOBILE TAB SWITCHER ===== */}
-      <div style={{
-        display: "flex",
-        background: "var(--color-brand-surface)",
-        borderBottom: "1px solid var(--color-brand-border)",
-      }} className="md:hidden">
-        <button
-          onClick={() => setShowCart(false)}
-          style={{
-            flex: 1, padding: "0.75rem", border: "none", cursor: "pointer",
-            background: !showCart ? "var(--color-brand-accent)" : "transparent",
-            color: !showCart ? "white" : "var(--color-brand-muted)",
-            fontWeight: "bold", fontSize: "0.9rem", transition: "all 0.2s",
-          }}
-        >
-          🔍 Scan Barang
-        </button>
-        <button
-          onClick={() => setShowCart(true)}
-          style={{
-            flex: 1, padding: "0.75rem", border: "none", cursor: "pointer",
-            background: showCart ? "var(--color-brand-accent)" : "transparent",
-            color: showCart ? "white" : "var(--color-brand-muted)",
-            fontWeight: "bold", fontSize: "0.9rem", transition: "all 0.2s",
-          }}
-        >
-          🛒 Keranjang {items.length > 0 && `(${items.length})`}
-        </button>
-      </div>
-
-      {/* ===== MAIN BODY ===== */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-
-        {/* ===== LEFT PANEL: SCAN + KERANJANG ===== */}
-        <div
-          style={{
-            flex: 2,
-            display: "flex",
-            flexDirection: "column",
-            gap: "1rem",
-            padding: "1rem",
-            overflow: "hidden",
-          }}
-          className={showCart ? "hidden md:flex" : "flex"}
-        >
-          {/* Scan Input */}
-          <div
+      {/* ===== MOBILE: TAB SWITCHER ===== */}
+      {isMobile && (
+        <div style={{
+          display: "flex", flexShrink: 0,
+          background: "var(--color-brand-surface)",
+          borderBottom: "1px solid var(--color-brand-border)",
+        }}>
+          <button
+            onClick={() => setActiveTab("scan")}
             style={{
-              background: "var(--color-brand-card)",
-              padding: "1.25rem",
-              borderRadius: "var(--radius-xl)",
-              border: `2px solid ${scanBorderColor}`,
-              position: "relative",
-              transition: "border-color 0.3s",
+              flex: 1, padding: "0.7rem", border: "none", cursor: "pointer",
+              background: activeTab === "scan" ? "var(--color-brand-accent)" : "transparent",
+              color: activeTab === "scan" ? "white" : "var(--color-brand-muted)",
+              fontWeight: "bold", fontSize: "0.85rem", transition: "all 0.2s",
             }}
           >
-            <p style={{ color: "var(--color-brand-muted)", fontSize: "0.75rem", textTransform: "uppercase", marginBottom: "0.5rem", fontWeight: "bold", letterSpacing: "0.05em" }}>
-              Cari Nama / Scan Barcode
-            </p>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <input
-                ref={inputRef}
-                type="text"
-                value={inputValue}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleScan(inputValue); }}
-                placeholder="Ketik nama / ID barang..."
-                style={{
-                  flex: 1, background: "transparent", border: "none",
-                  fontSize: "clamp(1.2rem, 4vw, 1.8rem)", color: "var(--color-brand-text)",
-                  outline: "none", fontWeight: "bold", fontFamily: "var(--font-mono)",
-                }}
-                autoComplete="off"
-              />
-              {/* Camera scan button */}
-              <button
-                onClick={() => setShowScanner(true)}
-                title="Scan dengan kamera"
-                style={{
-                  background: "var(--color-brand-surface)",
-                  color: "var(--color-brand-accent-light)",
-                  border: "1px solid var(--color-brand-border)",
-                  padding: "0.6rem 0.9rem",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                  fontSize: "1.2rem",
-                  flexShrink: 0,
-                }}
-              >
-                📷
-              </button>
-              <button
-                onClick={() => handleScan(inputValue)}
-                style={{
-                  background: "var(--color-brand-accent)", color: "white", border: "none",
-                  padding: "0.6rem 1rem", borderRadius: "8px", fontWeight: "bold", cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Tambah
-              </button>
-            </div>
-
-            {/* Dropdown results */}
-            {searchResults.length > 0 && (
-              <div style={{
-                position: "absolute", top: "100%", left: 0, right: 0,
-                background: "var(--color-brand-surface)",
-                border: "1px solid var(--color-brand-border)",
-                borderRadius: "0 0 12px 12px",
-                zIndex: 50, maxHeight: "280px", overflowY: "auto",
-                boxShadow: "0 10px 30px var(--color-brand-shadow)",
-              }}>
-                {searchResults.map(res => (
-                  <div
-                    key={res.id}
-                    onClick={() => handleScan(res.id)}
-                    style={{
-                      padding: "0.85rem 1rem",
-                      borderBottom: "1px solid var(--color-brand-border)",
-                      cursor: "pointer", display: "flex",
-                      justifyContent: "space-between", alignItems: "center",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: "bold", color: "var(--color-brand-text)" }}>{res.name}</div>
-                      <div style={{ fontSize: "0.75rem", color: "var(--color-brand-muted)" }}>
-                        {res.category} • {res.id}
-                      </div>
-                    </div>
-                    <div style={{ color: "var(--color-brand-green)", fontWeight: "bold", whiteSpace: "nowrap", marginLeft: "1rem" }}>
-                      Rp {res.price.toLocaleString("id-ID")}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {scanMessage && (
-              <p style={{ color: scanMessage.type === "error" ? "var(--color-brand-red)" : "var(--color-brand-green)", marginTop: "0.5rem", fontWeight: "bold", fontSize: "0.9rem" }}>
-                {scanMessage.text}
-              </p>
-            )}
-          </div>
-
-          {/* Keranjang Items */}
-          <div style={{
-            flex: 1, background: "var(--color-brand-card)",
-            borderRadius: "var(--radius-xl)", overflowY: "auto",
-            border: "1px solid var(--color-brand-border)",
-          }}>
-            {items.length === 0 ? (
-              <div style={{ display: "flex", height: "100%", alignItems: "center", justifyContent: "center", color: "var(--color-brand-muted)", flexDirection: "column", gap: "0.5rem" }}>
-                <span style={{ fontSize: "2.5rem" }}>🛒</span>
-                <span>Keranjang kosong</span>
-              </div>
-            ) : items.map((item) => (
-              <div key={item.id} style={{
-                display: "flex", justifyContent: "space-between",
-                padding: "0.85rem 1rem", borderBottom: "1px solid var(--color-brand-border)",
-                alignItems: "center", gap: "0.75rem",
-              }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: "var(--color-brand-text)", fontWeight: "bold", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {item.name}
-                  </div>
-                  <div style={{ color: "var(--color-brand-muted)", fontSize: "0.75rem" }}>
-                    {item.id} • {item.category}
-                  </div>
-                  <div style={{ color: "var(--color-brand-green)", fontWeight: "bold", marginTop: "0.1rem" }}>
-                    Rp {item.price.toLocaleString("id-ID")}
-                    {item.itemDiscountPct > 0 && (
-                      <span style={{ fontSize: "0.75rem", color: "var(--color-brand-muted)", marginLeft: "0.4rem", textDecoration: "line-through" }}>
-                        {item.originalPrice.toLocaleString("id-ID")}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => voidCartItem(item.id, user.name, user.id, "Dihapus dari kasir")}
-                  style={{
-                    background: "rgba(239,68,68,0.1)", color: "var(--color-brand-red)", border: "none",
-                    padding: "0.5rem 0.85rem", borderRadius: "8px", fontWeight: "bold", cursor: "pointer",
-                    fontSize: "1rem", flexShrink: 0,
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
+            🔍 Scan Barang
+          </button>
+          <button
+            onClick={() => setActiveTab("cart")}
+            style={{
+              flex: 1, padding: "0.7rem", border: "none", cursor: "pointer",
+              background: activeTab === "cart" ? "var(--color-brand-accent)" : "transparent",
+              color: activeTab === "cart" ? "white" : "var(--color-brand-muted)",
+              fontWeight: "bold", fontSize: "0.85rem", transition: "all 0.2s",
+            }}
+          >
+            🛒 Keranjang {items.length > 0 && `(${items.length})`}
+          </button>
         </div>
+      )}
 
-        {/* ===== RIGHT PANEL: SUMMARY ===== */}
-        <div
-          style={{
-            width: "100%",
-            maxWidth: "340px",
-            background: "var(--color-brand-card)",
-            borderLeft: "1px solid var(--color-brand-border)",
-            padding: "1.25rem",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "space-between",
-            overflowY: "auto",
-          }}
-          // On desktop: always show. On mobile: shown when showCart tab active
-          className={showCart ? "flex w-full max-w-full" : "hidden md:flex"}
-        >
-          <div>
-            <h2 style={{ color: "var(--color-brand-muted)", textTransform: "uppercase", fontSize: "0.8rem", letterSpacing: "0.08em", marginBottom: "1.25rem", fontWeight: "bold" }}>
-              Ringkasan Transaksi
-            </h2>
+      {/* ===== MAIN BODY ===== */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
 
-            <div style={{ display: "flex", justifyContent: "space-between", color: "var(--color-brand-text)", marginBottom: "1rem" }}>
-              <span>Subtotal ({items.length} item)</span>
-              <span>Rp {subtotal.toLocaleString("id-ID")}</span>
-            </div>
-
-            {/* Discount */}
-            <div style={{ marginBottom: "1.25rem", borderTop: "1px solid var(--color-brand-border)", paddingTop: "1rem" }}>
-              {appliedDiscount ? (
-                <div style={{ background: "rgba(16,185,129,0.08)", padding: "0.85rem", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid rgba(16,185,129,0.2)" }}>
-                  <div>
-                    <span style={{ color: "var(--color-brand-green)", fontWeight: "bold", display: "block", fontSize: "0.9rem" }}>
-                      Diskon {appliedDiscount.code} ({appliedDiscount.pct}%)
-                    </span>
-                    <span style={{ color: "var(--color-brand-green)", fontSize: "0.85rem" }}>
-                      - Rp {discountAmount.toLocaleString("id-ID")}
-                    </span>
-                  </div>
-                  <button onClick={clearDiscount} style={{ background: "none", border: "none", color: "var(--color-brand-red)", fontWeight: "bold", cursor: "pointer", fontSize: "1.1rem" }}>✕</button>
-                </div>
-              ) : (
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <input
-                    type="text" value={discountInput}
-                    onChange={e => setDiscountInput(e.target.value.toUpperCase())}
-                    onKeyDown={e => { if (e.key === "Enter") handleApplyDiscount(); }}
-                    placeholder="Kode Diskon..."
-                    className="wnp-input"
-                    style={{ flex: 1 }}
-                  />
-                  <button onClick={handleApplyDiscount} className="wnp-btn wnp-btn-ghost">Pakai</button>
-                </div>
-              )}
-            </div>
-
-            {/* Grand Total */}
-            <div style={{
-              display: "flex", justifyContent: "space-between",
-              color: "var(--color-brand-accent-light)", fontSize: "1.5rem", fontWeight: "bold",
-              borderTop: "1px solid var(--color-brand-border)", paddingTop: "1rem", marginBottom: "1rem",
-            }}>
-              <span>TOTAL</span>
-              <span>Rp {grandTotal.toLocaleString("id-ID")}</span>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            <button
-              onClick={() => { if (window.confirm("🚨 Kosongkan semua barang di keranjang?")) clearCart(user.name, user.id); }}
-              disabled={items.length === 0}
-              className="wnp-btn wnp-btn-danger"
-              style={{ width: "100%" }}
-            >
-              🗑️ Kosongkan Keranjang
-            </button>
-
-            <button
-              disabled={items.length === 0}
-              onClick={() => setIsModalOpen(true)}
-              style={{
-                width: "100%", padding: "1.25rem", borderRadius: "12px",
-                background: items.length === 0 ? "var(--color-brand-surface)" : "var(--color-brand-green-dark)",
-                color: items.length === 0 ? "var(--color-brand-muted)" : "white",
-                fontSize: "1.3rem", fontWeight: "bold", border: "none",
-                cursor: items.length === 0 ? "not-allowed" : "pointer",
-                transition: "all 0.2s",
-              }}
-            >
-              💳 BAYAR
-            </button>
-          </div>
-        </div>
+        {/* MOBILE: tampilkan satu panel sesuai tab aktif */}
+        {isMobile ? (
+          <>
+            {activeTab === "scan" && ScanPanel}
+            {activeTab === "cart" && SummaryPanel}
+          </>
+        ) : (
+          /* DESKTOP: dua panel side by side */
+          <>
+            {ScanPanel}
+            {SummaryPanel}
+          </>
+        )}
       </div>
 
       {/* ===== MODAL PEMBAYARAN ===== */}
       {isModalOpen && (
-        <div className="wnp-modal-overlay">
-          <div className="wnp-modal fade-in" style={{ textAlign: "center" }}>
-            <h2 style={{ color: "var(--color-brand-text)", marginBottom: "0.5rem", fontSize: "1.3rem" }}>Pilih Pembayaran</h2>
-            <div style={{ fontSize: "2.5rem", color: "var(--color-brand-green)", fontWeight: "bold", marginBottom: "1.5rem", fontFamily: "var(--font-mono)" }}>
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: "1rem",
+        }}>
+          <div className="fade-in" style={{
+            background: "var(--color-brand-card)", border: "1px solid var(--color-brand-border)",
+            borderRadius: "var(--radius-2xl)", padding: "2rem",
+            width: "100%", maxWidth: "400px", textAlign: "center",
+          }}>
+            <h2 style={{ color: "var(--color-brand-text)", marginBottom: "0.5rem", fontSize: "1.2rem" }}>Pilih Pembayaran</h2>
+            <div style={{ fontSize: "2.2rem", color: "var(--color-brand-green)", fontWeight: "bold", marginBottom: "1.25rem", fontFamily: "var(--font-mono)" }}>
               Rp {grandTotal.toLocaleString("id-ID")}
             </div>
 
-            <div style={{ marginBottom: "1.5rem" }}>
+            <div style={{ marginBottom: "1.25rem" }}>
               <input
                 type="tel" value={waNumber}
                 onChange={e => setWaNumber(e.target.value.replace(/\D/g, ""))}
@@ -477,29 +508,28 @@ export default function KasirPage() {
                 className="wnp-input"
                 style={{ textAlign: "center", fontSize: "1rem" }}
               />
-              <p style={{ color: "var(--color-brand-muted)", fontSize: "0.75rem", marginTop: "0.4rem" }}>
+              <p style={{ color: "var(--color-brand-muted)", fontSize: "0.72rem", marginTop: "0.35rem" }}>
                 Isi untuk kirim struk digital via WhatsApp
               </p>
             </div>
 
-            <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
+            <div style={{ display: "flex", gap: "0.75rem", marginBottom: "0.75rem" }}>
               <button
-                disabled={isProcessing}
-                onClick={() => handleFinalPayment("CASH")}
-                style={{ flex: 1, padding: "1.25rem", background: "var(--color-brand-green)", border: "none", borderRadius: "12px", color: "white", fontSize: "1.1rem", fontWeight: "bold", cursor: "pointer" }}
+                disabled={isProcessing} onClick={() => handleFinalPayment("CASH")}
+                style={{ flex: 1, padding: "1.1rem", background: "var(--color-brand-green)", border: "none", borderRadius: "12px", color: "white", fontSize: "1.1rem", fontWeight: "bold", cursor: "pointer" }}
               >
                 💵 CASH
               </button>
               <button
-                disabled={isProcessing}
-                onClick={() => handleFinalPayment("QRIS")}
-                style={{ flex: 1, padding: "1.25rem", background: "var(--color-brand-accent)", border: "none", borderRadius: "12px", color: "white", fontSize: "1.1rem", fontWeight: "bold", cursor: "pointer" }}
+                disabled={isProcessing} onClick={() => handleFinalPayment("QRIS")}
+                style={{ flex: 1, padding: "1.1rem", background: "var(--color-brand-accent)", border: "none", borderRadius: "12px", color: "white", fontSize: "1.1rem", fontWeight: "bold", cursor: "pointer" }}
               >
                 📱 QRIS
               </button>
             </div>
 
-            <button disabled={isProcessing} onClick={() => setIsModalOpen(false)} className="wnp-btn" style={{ background: "transparent", color: "var(--color-brand-muted)", width: "100%" }}>
+            <button disabled={isProcessing} onClick={() => setIsModalOpen(false)}
+              style={{ width: "100%", padding: "0.75rem", background: "transparent", color: "var(--color-brand-muted)", border: "none", cursor: "pointer", fontWeight: "bold" }}>
               Batal
             </button>
           </div>
