@@ -1,10 +1,9 @@
-"use client";
+﻿"use client";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/lib/authStore";
 import { useRouter } from "next/navigation";
 import Barcode from "react-barcode";
-import { PageHeader } from "@/components/PageHeader";
 
 export default function GenerateSKUPage() {
   const router = useRouter();
@@ -12,7 +11,7 @@ export default function GenerateSKUPage() {
   const [vendors, setVendors] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"single" | "mass">("single");
-
+  
   const [vendorId, setVendorId] = useState("");
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Pakaian");
@@ -30,222 +29,188 @@ export default function GenerateSKUPage() {
 
   const fetchVendors = async () => {
     const { data } = await supabase.from("vendors").select("id, code, name, item_count").eq("is_active", true);
-    if (data) { setVendors(data); if (data.length > 0) setVendorId(data[0].id); }
+    if (data) {
+      setVendors(data);
+      if (data.length > 0) setVendorId(data[0].id);
+    }
   };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !price || !vendorId) return alert("Nama, Harga, dan Vendor wajib diisi!");
+    
     setLoading(true);
     const vendor = vendors.find(v => v.id === vendorId);
     let currentCount = vendor.item_count || 0;
-    const newItems: any[] = [];
+    const newItems = [];
 
     if (mode === "mass") {
       const quantity = parseInt(qty);
       for (let i = 1; i <= quantity; i++) {
+        const seqNumber = (currentCount + i).toString().padStart(4, '0');
         newItems.push({
-          id: `${vendor.code}-${(currentCount + i).toString().padStart(4, "0")}`,
-          vendor_id: vendor.id, name: name.trim(),
-          category, price: parseInt(price), status: "available",
+          id: `${vendor.code}-${seqNumber}`,
+          vendor_id: vendor.id,
+          name: name.trim(),
+          category,
+          price: parseInt(price),
+          status: "available"
         });
       }
       currentCount += quantity;
     } else {
+      const seqNumber = (currentCount + 1).toString().padStart(4, '0');
       newItems.push({
-        id: `${vendor.code}-${(currentCount + 1).toString().padStart(4, "0")}`,
-        vendor_id: vendor.id, name: name.trim(), category,
-        price: parseInt(price), size: size || null, condition: condition || null, status: "available",
+        id: `${vendor.code}-${seqNumber}`,
+        vendor_id: vendor.id,
+        name: name.trim(),
+        category,
+        price: parseInt(price),
+        size: size || null,
+        condition: condition || null,
+        status: "available"
       });
       currentCount += 1;
     }
 
     const { error } = await supabase.from("items").insert(newItems);
-    if (error) { alert("Gagal menyimpan ke database. ID bentrok, silakan coba lagi."); console.error(error); }
+    
+    if (error) alert("Gagal menyimpan ke database.");
     else {
       await supabase.from("vendors").update({ item_count: currentCount }).eq("id", vendor.id);
       setGeneratedItems(newItems);
       setName(""); setPrice(""); setSize(""); setCondition("");
-      fetchVendors();
+      fetchVendors(); 
     }
     setLoading(false);
+  };
+
+  const triggerPrint = () => {
+    setTimeout(() => window.print(), 300);
   };
 
   if (!user) return null;
 
   return (
-    <div className="wnp-page">
-      <PageHeader title="Generate SKU &amp; Barcode">
-        {generatedItems.length > 0 && (
-          <button onClick={() => window.print()} className="wnp-btn wnp-btn-success no-print">
-            🖨️ Print Label
-          </button>
-        )}
-      </PageHeader>
+    <>
+      {/* UI UTAMA (Akan hilang total saat print karena class no-print) */}
+      <div className="no-print" style={{ padding: "2rem", background: "var(--color-brand-bg)", minHeight: "100vh", color: "white" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
+          <h1 style={{ fontSize: "2rem", fontWeight: "bold" }}>Generate SKU & Cetak Label</h1>
+          <button onClick={() => router.push("/owner")} style={{ padding: "0.5rem 1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", cursor: "pointer" }}>← Dashboard</button>
+        </div>
 
-      <div className="wnp-page-content no-print">
-        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-
-          {/* Flex row on tablet+ */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-
-            {/* FORM PANEL */}
-            <div className="wnp-card" style={{ flex: "1.5" }}>
-              {/* Tab Selector */}
-              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", borderBottom: "1px solid var(--color-brand-border)", paddingBottom: "1rem" }}>
-                <button
-                  onClick={() => setMode("single")}
-                  className="wnp-btn"
-                  style={{
-                    flex: 1, fontSize: "0.85rem",
-                    background: mode === "single" ? "var(--color-brand-accent)" : "transparent",
-                    color: mode === "single" ? "white" : "var(--color-brand-muted)",
-                    border: "1px solid var(--color-brand-border)",
-                  }}
-                >
-                  1 Satuan (Detail)
-                </button>
-                <button
-                  onClick={() => setMode("mass")}
-                  className="wnp-btn"
-                  style={{
-                    flex: 1, fontSize: "0.85rem",
-                    background: mode === "mass" ? "var(--color-brand-green-dark)" : "transparent",
-                    color: mode === "mass" ? "white" : "var(--color-brand-muted)",
-                    border: "1px solid var(--color-brand-border)",
-                  }}
-                >
-                  Massal (Cepat)
-                </button>
-              </div>
-
-              <form onSubmit={handleGenerate} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                <div>
-                  <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.4rem" }}>Vendor Pemilik</label>
-                  <select value={vendorId} onChange={e => setVendorId(e.target.value)} className="wnp-input">
-                    {vendors.map(v => <option key={v.id} value={v.id}>{v.name} (Code: {v.code})</option>)}
-                  </select>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.75rem" }}>
-                  <div>
-                    <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.4rem" }}>Nama Barang</label>
-                    <input type="text" placeholder="Kemeja Flannel Preloved" value={name} onChange={e => setName(e.target.value)} className="wnp-input" />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.4rem" }}>Harga (Rp)</label>
-                    <input type="number" placeholder="50000" value={price} onChange={e => setPrice(e.target.value)} className="wnp-input" />
-                  </div>
-                </div>
-
-                {mode === "single" && (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem" }}>
-                    <div>
-                      <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.4rem" }}>Kategori</label>
-                      <select value={category} onChange={e => setCategory(e.target.value)} className="wnp-input">
-                        <option>Pakaian</option><option>Tas</option><option>Sepatu</option><option>Lainnya</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.4rem" }}>Ukuran</label>
-                      <input type="text" placeholder="M/L/XL" value={size} onChange={e => setSize(e.target.value)} className="wnp-input" />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.4rem" }}>Kondisi</label>
-                      <input type="text" placeholder="Mulus 90%" value={condition} onChange={e => setCondition(e.target.value)} className="wnp-input" />
-                    </div>
-                  </div>
-                )}
-
-                {mode === "mass" && (
-                  <div>
-                    <label style={{ fontSize: "0.8rem", color: "var(--color-brand-green)", display: "block", marginBottom: "0.4rem", fontWeight: "bold" }}>
-                      Jumlah Label (1–200)
-                    </label>
-                    <input type="number" min="1" max="200" value={qty} onChange={e => setQty(e.target.value)} className="wnp-input"
-                      style={{ fontSize: "1.5rem", fontWeight: "bold", color: "var(--color-brand-green)", borderColor: "var(--color-brand-green)" }} />
-                  </div>
-                )}
-
-                <button
-                  type="submit" disabled={loading}
-                  className="wnp-btn"
-                  style={{
-                    background: mode === "single" ? "var(--color-brand-accent)" : "var(--color-brand-green-dark)",
-                    color: "white", fontSize: "1rem", marginTop: "0.5rem",
-                  }}
-                >
-                  {loading ? "Memproses..." : `⚡ Generate ${mode === "single" ? "Satuan" : "Massal"}`}
-                </button>
-              </form>
+        <div style={{ display: "flex", gap: "2rem", alignItems: "flex-start" }}>
+          <div style={{ flex: 1.5, background: "var(--color-brand-card)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: "1px solid var(--color-brand-border)" }}>
+            <div style={{ display: "flex", gap: "1rem", marginBottom: "2rem", borderBottom: "1px solid var(--color-brand-border)", paddingBottom: "1rem" }}>
+              <button onClick={() => setMode("single")} style={{ flex: 1, padding: "1rem", background: mode === "single" ? "var(--color-brand-surface)" : "transparent", color: mode === "single" ? "var(--color-brand-accent-light)" : "var(--color-brand-muted)", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer" }}>1. GENERATE SATUAN (Detail)</button>
+              <button onClick={() => setMode("mass")} style={{ flex: 1, padding: "1rem", background: mode === "mass" ? "var(--color-brand-surface)" : "transparent", color: mode === "mass" ? "var(--color-brand-green)" : "var(--color-brand-muted)", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer" }}>2. GENERATE MASSAL (Cepat)</button>
             </div>
 
-            {/* PREVIEW PANEL */}
-            <div className="wnp-card" style={{ flex: 1, borderStyle: "dashed" }}>
-              <h2 style={{ fontSize: "1rem", fontWeight: "bold", marginBottom: "1rem" }}>
-                📋 Preview Label ({generatedItems.length} item)
-              </h2>
-
-              <div style={{ maxHeight: "480px", overflowY: "auto" }}>
-                {generatedItems.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "3rem", color: "var(--color-brand-muted)" }}>
-                    <div style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>🖨️</div>
-                    Generate item dulu untuk melihat preview
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: mode === "single" ? "1fr" : "1fr 1fr", gap: "0.5rem" }}>
-                    {generatedItems.slice(0, 20).map(item => (
-                      <div key={item.id} style={{
-                        background: "white", color: "black", padding: "0.6rem", borderRadius: "4px",
-                        textAlign: "center", border: "1px solid #ccc",
-                      }}>
-                        <div style={{ fontSize: "0.65rem", fontWeight: "bold", textTransform: "uppercase" }}>WNP PRELOVED</div>
-                        <Barcode value={item.id} displayValue height={40} width={1.5} margin={0} fontSize={11} background="transparent" />
-                        <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "green" }}>Rp {item.price.toLocaleString("id-ID")}</div>
-                        {item.size && <div style={{ fontSize: "0.7rem" }}>Size: {item.size}</div>}
-                      </div>
-                    ))}
-                    {generatedItems.length > 20 && (
-                      <div style={{ gridColumn: "1/-1", textAlign: "center", color: "var(--color-brand-muted)", fontSize: "0.85rem", padding: "1rem" }}>
-                        +{generatedItems.length - 20} item lagi (semua akan tercetak saat print)
-                      </div>
-                    )}
-                  </div>
-                )}
+            <form onSubmit={handleGenerate} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div>
+                <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>Vendor Pemilik</label>
+                <select value={vendorId} onChange={e => setVendorId(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", marginTop: "0.5rem" }}>
+                  {vendors.map(v => <option key={v.id} value={v.id}>{v.name} (Code: {v.code})</option>)}
+                </select>
               </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem" }}>
+                <div>
+                  <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>Nama Barang</label>
+                  <input type="text" placeholder="misal: Kemeja Flannel" value={name} onChange={e => setName(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", marginTop: "0.5rem" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>Harga (Rp)</label>
+                  <input type="number" placeholder="50000" value={price} onChange={e => setPrice(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", marginTop: "0.5rem" }} />
+                </div>
+              </div>
+
+              {mode === "single" && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+                  <div>
+                    <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>Kategori</label>
+                    <select value={category} onChange={e => setCategory(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", marginTop: "0.5rem" }}>
+                      <option value="Pakaian">Pakaian</option>
+                      <option value="Tas">Tas</option>
+                      <option value="Sepatu">Sepatu</option>
+                      <option value="Lainnya">Lainnya</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>Ukuran</label>
+                    <input type="text" placeholder="M/L/XL" value={size} onChange={e => setSize(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", marginTop: "0.5rem" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>Kondisi</label>
+                    <input type="text" placeholder="Mulus 90%" value={condition} onChange={e => setCondition(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", marginTop: "0.5rem" }} />
+                  </div>
+                </div>
+              )}
+
+              {mode === "mass" && (
+                <div>
+                  <label style={{ fontSize: "0.85rem", color: "var(--color-brand-green)" }}>Jumlah Label Digenerate Massal</label>
+                  <input type="number" min="1" max="200" value={qty} onChange={e => setQty(e.target.value)} style={{ width: "100%", padding: "1.5rem", background: "var(--color-brand-surface)", color: "var(--color-brand-green)", border: "1px solid var(--color-brand-green)", borderRadius: "8px", outline: "none", marginTop: "0.5rem", fontSize: "1.5rem", fontWeight: "bold" }} />
+                </div>
+              )}
+
+              <button type="submit" disabled={loading} style={{ padding: "1.2rem", background: mode === "single" ? "var(--color-brand-accent)" : "var(--color-brand-green-dark)", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: loading ? "not-allowed" : "pointer", marginTop: "1rem", fontSize: "1.1rem" }}>
+                {loading ? "Memproses..." : `⚡ GENERATE ${mode.toUpperCase()}`}
+              </button>
+            </form>
+          </div>
+
+          <div style={{ flex: 1, background: "var(--color-brand-surface)", padding: "1.5rem", borderRadius: "var(--radius-xl)", border: "1px dashed var(--color-brand-border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h2 style={{ fontSize: "1.2rem", color: "white" }}>Preview Label</h2>
+              {generatedItems.length > 0 && (
+                <button onClick={triggerPrint} style={{ padding: "0.5rem 1rem", background: "var(--color-brand-green)", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>🖨️ Print Label</button>
+              )}
+            </div>
+            
+            <div style={{ maxHeight: "500px", overflowY: "auto", paddingRight: "0.5rem" }}>
+              {generatedItems.length === 0 ? (
+                <p style={{ color: "var(--color-brand-muted)", textAlign: "center", marginTop: "2rem" }}>Belum ada data.</p>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: mode === "single" ? "1fr" : "1fr 1fr", gap: "0.5rem" }}>
+                  {generatedItems.map(item => (
+                    <div key={item.id} style={{ background: "white", color: "black", padding: "0.8rem", borderRadius: "4px", textAlign: "center", border: "1px solid #ccc" }}>
+                      <div style={{ fontSize: "0.7rem", fontWeight: "bold" }}>WNP PRELOVED</div>
+                      <div style={{ fontSize: "1.2rem", fontWeight: "900", fontFamily: "monospace", margin: "0.2rem 0" }}>{item.id}</div>
+                      <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "green" }}>Rp {item.price.toLocaleString("id-ID")}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* PRINT STYLES */}
-      <style dangerouslySetInnerHTML={{ __html: `
+      {/* RENDER BARCODE KHUSUS UNTUK PRINTER */}
+      <style dangerouslySetInnerHTML={{__html: `
         @media print {
-          body * { visibility: hidden; }
+          html, body { margin: 0; padding: 0; background: white; -webkit-print-color-adjust: exact; }
           .no-print { display: none !important; }
-          #printable-area, #printable-area * { visibility: visible; }
-          #printable-area {
-            position: absolute; left: 0; top: 0; width: 100%;
-            display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px;
-          }
-          .print-label { border: 1px dashed #999; padding: 6px; text-align: center; page-break-inside: avoid; }
-        }
-        @media (min-width: 768px) {
-          .gen-layout { flex-direction: row !important; }
+          /* Menggunakan Flexbox agar label dapat menyesuaikan kertas yang digunakan (Stiker A4 atau Thermal Roll) */
+          #mass-print-area { display: flex !important; flex-wrap: wrap; justify-content: flex-start; gap: 10px; width: 100%; color: black; font-family: sans-serif; }
+          .print-label-item { page-break-inside: avoid; border: 1px dashed black; padding: 10px; text-align: center; min-width: 40mm; }
         }
       `}} />
 
-      {/* PRINT AREA */}
-      <div id="printable-area" style={{ display: "none" }}>
+      <div id="mass-print-area" style={{ display: "none" }}>
         {generatedItems.map(item => (
-          <div key={item.id} className="print-label" style={{ color: "black", display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <div style={{ fontSize: "10px", fontWeight: "bold", marginBottom: "3px" }}>WNP PRELOVED</div>
-            <Barcode value={item.id} displayValue height={50} width={1.8} margin={0} fontSize={14} background="transparent" />
-            <div style={{ fontSize: "14px", fontWeight: "bold", marginTop: "3px" }}>Rp {item.price.toLocaleString("id-ID")}</div>
-            {item.size && <div style={{ fontSize: "10px" }}>Size: {item.size}</div>}
+          <div key={item.id} className="print-label-item">
+            <div style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "4px" }}>WNP PRELOVED</div>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "4px" }}>
+              <Barcode value={item.id} displayValue={true} height={40} width={1.5} margin={0} fontSize={14} background="transparent" />
+            </div>
+            <div style={{ fontSize: "16px", fontWeight: "bold" }}>Rp {item.price.toLocaleString("id-ID")}</div>
+            {item.size && <div style={{ fontSize: "10px", marginTop: "2px" }}>Size: {item.size}</div>}
           </div>
         ))}
       </div>
-    </div>
+    </>
   );
 }

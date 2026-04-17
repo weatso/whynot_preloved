@@ -8,7 +8,6 @@ interface BarcodeScannerProps {
 
 export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
   const scannerRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const scannedRef = useRef(false);
@@ -18,43 +17,46 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
     const initScanner = async () => {
       try {
-        const { Html5QrcodeScanner, Html5QrcodeScanType } = await import("html5-qrcode");
-        
-        if (!containerRef.current) return;
+        const { Html5Qrcode } = await import("html5-qrcode");
 
-        scanner = new Html5QrcodeScanner(
-          "wnp-qr-reader",
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 150 },
-            rememberLastUsedCamera: true,
-            supportedScanTypes: [
-              Html5QrcodeScanType.SCAN_TYPE_CAMERA,
-              Html5QrcodeScanType.SCAN_TYPE_FILE,
-            ],
-            aspectRatio: 1.0,
-            showZoomSliderIfSupported: true,
+        // Selalu gunakan kamera belakang langsung — tidak ada mode selection
+        const cameras = await Html5Qrcode.getCameras();
+        if (!cameras || cameras.length === 0) {
+          setError("Tidak ada kamera ditemukan di perangkat ini.");
+          setIsLoading(false);
+          return;
+        }
+
+        // Pilih kamera belakang jika ada, kalau tidak pilih yang pertama
+        const backCamera = cameras.find(c =>
+          c.label.toLowerCase().includes("back") ||
+          c.label.toLowerCase().includes("rear") ||
+          c.label.toLowerCase().includes("environment")
+        ) || cameras[cameras.length - 1];
+
+        scanner = new Html5Qrcode("wnp-qr-reader");
+
+        await scanner.start(
+          backCamera.id,
+          { fps: 15, qrbox: { width: 280, height: 160 }, aspectRatio: 1.7 },
+          (decodedText: string) => {
+            if (scannedRef.current) return;
+            scannedRef.current = true;
+            onScan(decodedText.trim().toUpperCase());
+            onClose();
           },
-          /* verbose= */ false
+          () => { /* silent failure during scan */ }
         );
 
-        const onSuccess = (decodedText: string) => {
-          if (scannedRef.current) return;
-          scannedRef.current = true;
-          onScan(decodedText.trim().toUpperCase());
-          onClose();
-        };
-
-        const onScanFailure = () => {
-          // silent - normal during scanning
-        };
-
-        scanner.render(onSuccess, onScanFailure);
         scannerRef.current = scanner;
         setIsLoading(false);
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
-        setError("Gagal memuat kamera. Pastikan browser mengizinkan akses kamera.");
+        if (err?.name === "NotAllowedError" || String(err).includes("Permission")) {
+          setError("Akses kamera ditolak. Izinkan kamera di pengaturan browser lalu coba lagi.");
+        } else {
+          setError("Gagal membuka kamera. Pastikan tidak ada aplikasi lain yang menggunakan kamera.");
+        }
         setIsLoading(false);
       }
     };
@@ -63,86 +65,96 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
     return () => {
       if (scannerRef.current) {
-        scannerRef.current.clear().catch(() => {});
+        scannerRef.current.stop().catch(() => {}).then(() => {
+          scannerRef.current?.clear().catch(() => {});
+        });
       }
     };
-  }, [onScan, onClose]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="wnp-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div
-        className="wnp-modal fade-in"
-        style={{ maxWidth: "520px" }}
-      >
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)",
+        display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", zIndex: 200, padding: "1rem",
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{
+        width: "100%", maxWidth: "480px",
+        background: "var(--color-brand-card)",
+        borderRadius: "16px",
+        overflow: "hidden",
+        border: "1px solid var(--color-brand-border)",
+      }}>
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-          <div>
-            <h2 style={{ fontSize: "1.2rem", fontWeight: "bold", color: "var(--color-brand-text)" }}>
-              📷 Scan Barcode
-            </h2>
-            <p style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", marginTop: "0.25rem" }}>
-              Arahkan kamera ke barcode label atau upload gambar
-            </p>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "1rem 1.25rem",
+          borderBottom: "1px solid var(--color-brand-border)",
+          background: "var(--color-brand-surface)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span style={{ fontSize: "1.3rem" }}>📷</span>
+            <div>
+              <h2 style={{ fontSize: "1rem", fontWeight: "bold", color: "var(--color-brand-text)", margin: 0 }}>Scan Barcode</h2>
+              <p style={{ fontSize: "0.75rem", color: "var(--color-brand-muted)", margin: 0 }}>Arahkan ke label barcode barang</p>
+            </div>
           </div>
           <button
             onClick={onClose}
             style={{
-              background: "transparent",
-              border: "1px solid var(--color-brand-border)",
-              color: "var(--color-brand-muted)",
-              padding: "0.4rem 0.8rem",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "1.1rem",
-              lineHeight: 1,
+              background: "rgba(239,68,68,0.1)", border: "1px solid var(--color-brand-red)",
+              color: "var(--color-brand-red)", padding: "0.4rem 0.8rem",
+              borderRadius: "6px", cursor: "pointer", fontSize: "0.9rem", fontWeight: "bold",
             }}
           >
-            ✕
+            ✕ Tutup
           </button>
         </div>
 
-        {/* Scanner Container */}
-        {isLoading && (
-          <div style={{ textAlign: "center", padding: "3rem", color: "var(--color-brand-muted)" }}>
-            Memuat kamera...
-          </div>
-        )}
+        {/* Camera View */}
+        <div style={{ position: "relative", background: "#000", minHeight: "220px" }}>
+          {isLoading && (
+            <div style={{
+              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", gap: "0.75rem",
+              color: "white", fontSize: "0.9rem",
+            }}>
+              <div style={{ fontSize: "2rem" }}>📷</div>
+              <span>Membuka kamera...</span>
+            </div>
+          )}
+          <div id="wnp-qr-reader" style={{ width: "100%" }} />
+        </div>
 
+        {/* Error */}
         {error && (
           <div style={{
-            padding: "1rem",
+            padding: "1rem 1.25rem",
             background: "rgba(239,68,68,0.1)",
-            border: "1px solid var(--color-brand-red)",
-            borderRadius: "8px",
-            color: "var(--color-brand-red)",
-            marginBottom: "1rem",
-            fontSize: "0.9rem",
+            borderTop: "1px solid var(--color-brand-red)",
+            color: "var(--color-brand-red)", fontSize: "0.85rem",
+            display: "flex", gap: "0.5rem", alignItems: "flex-start",
           }}>
-            {error}
+            <span style={{ flexShrink: 0 }}>⚠️</span>
+            <span>{error}</span>
           </div>
         )}
 
-        <div ref={containerRef}>
-          <div id="wnp-qr-reader" style={{ width: "100%", borderRadius: "8px", overflow: "hidden" }} />
-        </div>
-
-        <div style={{
-          marginTop: "1rem",
-          padding: "0.75rem 1rem",
-          background: "rgba(124,58,237,0.08)",
-          borderRadius: "8px",
-          fontSize: "0.8rem",
-          color: "var(--color-brand-muted)",
-          display: "flex",
-          gap: "0.5rem",
-          alignItems: "flex-start",
-        }}>
-          <span style={{ flexShrink: 0 }}>💡</span>
-          <span>
-            Gunakan <strong style={{ color: "var(--color-brand-accent-light)" }}>kamera depan/belakang</strong> untuk scan.
-            Barcode scanner fisik (USB/Bluetooth) otomatis terbaca via input field di halaman utama.
-          </span>
-        </div>
+        {/* Footer hint */}
+        {!error && !isLoading && (
+          <div style={{
+            padding: "0.75rem 1.25rem", background: "var(--color-brand-surface)",
+            fontSize: "0.78rem", color: "var(--color-brand-muted)",
+            display: "flex", gap: "0.5rem", alignItems: "center",
+            borderTop: "1px solid var(--color-brand-border)",
+          }}>
+            <span>💡</span>
+            <span>Posisikan barcode di tengah area yang terdeteksi. Scanner fisik tetap bisa dipakai via input field.</span>
+          </div>
+        )}
       </div>
     </div>
   );

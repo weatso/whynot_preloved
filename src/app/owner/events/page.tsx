@@ -10,9 +10,17 @@ interface EventData {
   name: string;
   location: string;
   start_date: string;
+  end_date: string;
   is_active: boolean;
   is_closed: boolean;
 }
+
+// Format ISO date (yyyy-mm-dd) → dd/mm/yyyy untuk display
+const fmtDate = (iso: string) => {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+};
 
 export default function EventsPage() {
   const router = useRouter();
@@ -21,8 +29,8 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
 
   const [name, setName] = useState("");
-  const [location, setLocation] = useState("");
   const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   useEffect(() => {
     if (!user || user.role !== "owner") { router.replace("/login"); return; }
@@ -38,10 +46,13 @@ export default function EventsPage() {
 
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !startDate) return alert("Nama dan Tanggal Mulai wajib diisi!");
-    const { error } = await supabase.from("events").insert({ name, location, start_date: startDate, is_active: true, created_by: user?.id });
+    if (!name || !startDate) return alert("Nama Event dan Tanggal Mulai wajib diisi!");
+    const { error } = await supabase.from("events").insert({
+      name, start_date: startDate, end_date: endDate || null,
+      is_active: true, created_by: user?.id,
+    });
     if (error) alert("Gagal membuat event.");
-    else { setName(""); setLocation(""); setStartDate(""); fetchEvents(); }
+    else { setName(""); setStartDate(""); setEndDate(""); fetchEvents(); }
   };
 
   const toggleActive = async (id: string, currentStatus: boolean) => {
@@ -50,8 +61,8 @@ export default function EventsPage() {
   };
 
   const closeEvent = async (id: string) => {
-    if (!confirm("Tutup event ini? Setelah ditutup, event akan masuk ke Settlement dan tidak bisa dipakai transaksi lagi.")) return;
-    await supabase.from("events").update({ is_closed: true, is_active: false, end_date: new Date().toISOString() }).eq("id", id);
+    if (!confirm("Tutup event ini? Setelah ditutup, event masuk ke Settlement dan tidak bisa dipakai transaksi lagi.")) return;
+    await supabase.from("events").update({ is_closed: true, is_active: false, end_date: new Date().toISOString().split("T")[0] }).eq("id", id);
     fetchEvents();
   };
 
@@ -70,14 +81,47 @@ export default function EventsPage() {
               + Buat Event Baru
             </h2>
             <form onSubmit={handleCreateEvent} style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
-              <input type="text" placeholder="Nama Event (misal: Kota Lama #1)" value={name}
-                onChange={e => setName(e.target.value)} className="wnp-input" />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-                <input type="text" placeholder="Lokasi" value={location}
-                  onChange={e => setLocation(e.target.value)} className="wnp-input" />
-                <input type="date" value={startDate}
-                  onChange={e => setStartDate(e.target.value)} className="wnp-input" />
+              {/* Nama Event */}
+              <div>
+                <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.35rem" }}>Nama Event</label>
+                <input type="text" placeholder="Kota Lama Preloved #1" value={name}
+                  onChange={e => setName(e.target.value)} className="wnp-input" />
               </div>
+
+              {/* Tanggal — grid 2 kolom */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                <div>
+                  <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.35rem" }}>
+                    Tanggal Mulai <span style={{ color: "var(--color-brand-red)" }}>*</span>
+                  </label>
+                  <input
+                    type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                    className="wnp-input"
+                    style={{ colorScheme: "dark" }}
+                  />
+                  {startDate && (
+                    <p style={{ fontSize: "0.75rem", color: "var(--color-brand-accent-light)", marginTop: "0.25rem" }}>
+                      📅 {fmtDate(startDate)}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label style={{ fontSize: "0.8rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.35rem" }}>
+                    Tanggal Selesai (Opsional)
+                  </label>
+                  <input
+                    type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                    className="wnp-input" min={startDate}
+                    style={{ colorScheme: "dark" }}
+                  />
+                  {endDate && (
+                    <p style={{ fontSize: "0.75rem", color: "var(--color-brand-accent-light)", marginTop: "0.25rem" }}>
+                      📅 {fmtDate(endDate)}
+                    </p>
+                  )}
+                </div>
+              </div>
+
               <button type="submit" className="wnp-btn wnp-btn-primary" style={{ marginTop: "0.25rem" }}>
                 Simpan Event
               </button>
@@ -106,11 +150,12 @@ export default function EventsPage() {
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <h3 style={{ fontWeight: "bold", fontSize: "1rem" }}>{ev.name}</h3>
                       <p style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem", marginTop: "0.15rem" }}>
-                        {ev.location} • Mulai: {ev.start_date}
+                        {fmtDate(ev.start_date)}
+                        {ev.end_date ? ` — ${fmtDate(ev.end_date)}` : ""}
                       </p>
                       <div style={{ marginTop: "0.4rem" }}>
                         {ev.is_closed ? (
-                          <span className="wnp-badge wnp-badge-gray">CLOSED</span>
+                          <span className="wnp-badge wnp-badge-gray">CLOSED — Menunggu Settlement</span>
                         ) : (
                           <span className={`wnp-badge ${ev.is_active ? "wnp-badge-green" : "wnp-badge-red"}`}>
                             {ev.is_active ? "AKTIF" : "NONAKTIF"}
@@ -144,6 +189,12 @@ export default function EventsPage() {
           </div>
         </div>
       </div>
+
+      {/* Override date input color scheme for light mode */}
+      <style>{`
+        input[type="date"] { color: var(--color-brand-text); }
+        [data-theme="light"] input[type="date"] { color-scheme: light; }
+      `}</style>
     </div>
   );
 }
