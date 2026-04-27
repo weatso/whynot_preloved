@@ -15,10 +15,18 @@ export default function OwnerDashboard() {
   const [voidLogs, setVoidLogs] = useState<any[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>("all");
   const [events, setEvents] = useState<{ id: string; name: string }[]>([]);
+  const [tenantName, setTenantName] = useState("");
 
   useEffect(() => {
-    if (!user || user.role === "kasir") router.replace("/login");
-    else { fetchEvents(); fetchDashboardData("all"); }
+    if (!user) { router.replace("/login"); return; }
+    if (user.role === "superadmin") { router.replace("/superadmin"); return; }
+    if (user.role === "kasir") { router.replace("/kasir"); return; }
+    fetchEvents(); fetchDashboardData("all");
+    // Fetch tenant name for the header
+    if (user.tenant_id) {
+      supabase.from("tenants").select("name").eq("id", user.tenant_id).single()
+        .then(({ data }) => { if (data) setTenantName(data.name); });
+    }
   }, [user, router]);
 
   const fetchEvents = async () => {
@@ -95,10 +103,10 @@ export default function OwnerDashboard() {
           />
           <div>
             <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--color-brand-text)", lineHeight: 1.1 }}>
-              Why Not Preloved
+              {tenantName || "Why Not Preloved"}
             </div>
             <div style={{ fontSize: "0.68rem", color: "var(--color-brand-muted)", lineHeight: 1 }}>
-              Owner Dashboard
+              {user?.role === "admin" ? "Admin Dashboard" : "Owner Dashboard"}
             </div>
           </div>
         </div>
@@ -157,7 +165,8 @@ export default function OwnerDashboard() {
               <NavButton title="Semua Transaksi" path="/owner/transactions" icon="📋" />
               <NavButton title="Events" path="/owner/events" icon="📅" />
               <NavButton title="Settlement" path="/owner/settlement" icon="💰" />
-              <NavButton title="Kode Diskon" path="/owner/discounts" icon="🏷️" />
+              <NavButton title="Dashboard Analitik" path="/owner/dashboard" icon="📈" />
+              <NavButton title="Kode Diskon" path="/owner/master-data?tab=discounts" icon="🏷️" />
               <NavButton title="Audit Log" path="/owner/audit" icon="🚨" />
             </div>
           </div>
@@ -167,10 +176,11 @@ export default function OwnerDashboard() {
               Master Data
             </h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: "0.65rem" }}>
-              <NavButton title="Data Vendor" path="/owner/vendors" icon="🏢" />
+              <NavButton title="Data Vendor" path="/owner/master-data?tab=vendors" icon="🏢" />
               <NavButton title="Data Akun" path="/owner/users" icon="👥" />
-              <NavButton title="Database Stok" path="/owner/stock" icon="📦" />
+              <NavButton title="Database Stok" path="/owner/master-data?tab=items" icon="📦" />
               <NavButton title="Generate SKU" path="/owner/generate" icon="🖨️" />
+              <NavButton title="Pengaturan" path="/owner/settings" icon="⚙️" />
             </div>
           </div>
         </div>

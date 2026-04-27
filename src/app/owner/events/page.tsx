@@ -33,7 +33,7 @@ export default function EventsPage() {
   const [endDate, setEndDate] = useState("");
 
   useEffect(() => {
-    if (!user || user.role !== "owner") { router.replace("/login"); return; }
+    if (!user || (user.role !== "owner" && user.role !== "admin")) { router.replace("/login"); return; }
     fetchEvents();
   }, [user, router]);
 
@@ -47,12 +47,18 @@ export default function EventsPage() {
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !startDate) return alert("Nama Event dan Tanggal Mulai wajib diisi!");
+    if (!user?.tenant_id) return alert("Sesi tidak valid. Silakan login ulang.");
     const { error } = await supabase.from("events").insert({
+      tenant_id: user.tenant_id,
       name, start_date: startDate, end_date: endDate || null,
       is_active: true, created_by: user?.id,
     });
-    if (error) alert("Gagal membuat event.");
-    else { setName(""); setStartDate(""); setEndDate(""); fetchEvents(); }
+    if (error) {
+      console.error("Create event error:", error);
+      alert("Gagal membuat event: " + error.message);
+    } else {
+      setName(""); setStartDate(""); setEndDate(""); fetchEvents();
+    }
   };
 
   const toggleActive = async (id: string, currentStatus: boolean) => {

@@ -8,47 +8,80 @@ export interface AuthUser {
   username: string;
   name: string;
   role: UserRole;
+  tenant_id: string;
+}
+
+export interface TenantBranding {
+  name: string;
+  logoUrl: string | null;
+  receiptFooter: string | null;
 }
 
 interface AuthStore {
+  token: string | null;
   user: AuthUser | null;
-  login: (username: string, pin: string) => Promise<{ success: boolean; error?: string }>;
+  tenantBranding: TenantBranding | null;
+  login: (username: string, password: string) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
   logout: () => void;
   canAccess: (page: string) => boolean;
 }
 
 const OWNER_PAGES = ["settlement", "audit", "generate", "events", "vendors", "discounts", "settings"];
 
+import { loginWithPassword, logoutFromServer } from "../app/actions/auth";
+
 export const useAuthStore = create<AuthStore>()(
   persist(
     (set, get) => ({
+      token: null,
       user: null,
+      tenantBranding: null,
 
-      login: async (username, pin) => {
-        const { data, error } = await supabase
-          .from("users")
-          .select("id, username, name, role")
-          .eq("username", username.toLowerCase().trim())
-          .eq("pin", pin)
-          .eq("is_active", true)
-          .single();
+      login: async (username, password) => {
+        try {
+          const result = await loginWithPassword(username, password);
+          
+          if (!result.success || !result.token || !result.user) {
+            return { success: false, error: result.error || "Gagal masuk" };
+          }
 
-        if (error || !data) {
-          return { success: false, error: "Username atau PIN salah" };
+          const authUser = {
+            id: result.user.id,
+            username: result.user.username,
+            name: result.user.name,
+            role: result.user.role as UserRole,
+            tenant_id: result.user.tenant_id,
+          };
+          set({
+            token: result.token,
+            user: authUser,
+            tenantBranding: result.branding || null,
+          });
+          return { success: true, user: authUser };
+        } catch (error) {
+          console.error("Login Error:", error);
+          return { success: false, error: "Terjadi kesalahan pada server" };
         }
-
-        set({
-          user: {
-            id: data.id,
-            username: data.username,
-            name: data.name,
-            role: data.role as UserRole,
-          },
-        });
-        return { success: true };
       },
 
-      logout: () => set({ user: null }),
+      logout: async () => {
+        // 1. Clear server-side HttpOnly cookie
+        try {
+          await logoutFromServer();
+        } catch (e) {
+          console.error("Logout from server failed:", e);
+        }
+
+        // 2. Clear local state
+        set({ token: null, user: null, tenantBranding: null });
+        
+        // 3. Nuke everything in storage and redirect
+        if (typeof window !== "undefined") {
+          localStorage.clear();
+          sessionStorage.clear();
+          window.location.href = "/login";
+        }
+      },
 
       canAccess: (page: string) => {
         const { user } = get();
@@ -61,8 +94,8 @@ export const useAuthStore = create<AuthStore>()(
       },
     }),
     {
-      name: "wnp-auth-v3",
-      partialize: (state) => ({ user: state.user }),
+      name: "wnp-auth-v4",
+      partialize: (state) => ({ token: state.token, user: state.user, tenantBranding: state.tenantBranding }),
     }
   )
 );

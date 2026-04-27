@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { supabase } from "./supabase";
+import { useAuthStore } from "./authStore";
 
 export interface EventSession {
   eventId: string | null;
@@ -16,6 +17,7 @@ export interface CartItem {
   originalPrice: number;
   itemDiscountPct: number;
   vendorId: string | null;
+  vendorCommissionRate: number;
 }
 
 export interface CachedItem {
@@ -28,7 +30,7 @@ export interface CachedItem {
   discount_percentage: number;
   vendor_id: string | null;
   status: string;
-  barcode?: string | null;
+  vendor_commission_rate: number;
 }
 
 export interface PendingTransaction {
@@ -72,62 +74,55 @@ interface CartStore {
 
 async function pushTxnToSupabase(p: PendingTransaction): Promise<boolean> {
   try {
-    if (p.customerPhone) {
-      await supabase.from("customers").upsert(
-        { phone_number: p.customerPhone, last_visit: new Date().toISOString() },
-        { onConflict: "phone_number" }
-      );
-    }
+    const token = useAuthStore.getState().token;
+    if (!token) throw new Error("No token found");
+    const jwtPayload = JSON.parse(atob(token.split('.')[1]));
+    const tenantId = jwtPayload.tenant_id;
 
+    if (!tenantId) throw new Error("No tenant_id in token");
+
+    // Persiapkan data item untuk RPC
     const codePct = p.discountPct / 100;
-    
-    const { data: txn, error: txnErr } = await supabase
-      .from("transactions")
-      .insert({
-        total_amount: p.total,
-        discount_applied: p.subtotal - p.total,
-        discount_code: p.discountCode || null,
-        discount_bearer: p.discountBearer || null,
-        payment_method: p.paymentMethod,
-        cashier_name: p.cashierName,
-        cashier_id: p.cashierId,
-        customer_phone: p.customerPhone || null,
-        event_id: p.eventId || null,
-        sale_type: p.saleType,
-      })
-      .select()
-      .single();
-
-    if (txnErr || !txn) {
-      console.error("DB_TXN_ERROR:", txnErr);
-      return false;
-    }
-
-    const pivotRows = p.items.map((item) => {
+    const itemPayload = p.items.map(item => {
       const priceAtSale = codePct > 0 ? Math.round(item.price * (1 - codePct)) : item.price;
       return {
-        transaction_id: txn.id,
         item_id: item.id,
         price_at_sale: priceAtSale,
         discount_applied: item.originalPrice - priceAtSale,
-        discount_code_used: p.discountCode || null,
-        discount_bearer: p.discountBearer || null,
+        vendor_commission_rate: item.vendorCommissionRate
       };
     });
 
-    const { error: pivotErr } = await supabase.from("transaction_items").insert(pivotRows);
-    if (pivotErr) {
-      console.error("DB_PIVOT_ERROR:", pivotErr);
-      // ROLLBACK TRANSAKSI JIKA ITEM GAGAL MASUK
-      await supabase.from("transactions").delete().eq("id", txn.id);
-      return false;
+    // Panggil RPC Atomic Checkout
+    const { data: txnId, error } = await supabase.rpc("process_checkout_v2", {
+      p_tenant_id: tenantId,
+      p_cashier_id: p.cashierId,
+      p_cashier_name: p.cashierName,
+      p_total_amount: p.total,
+      p_discount_applied: p.subtotal - p.total,
+      p_payment_method: p.paymentMethod,
+      p_sale_type: p.saleType,
+      p_event_id: p.eventId,
+      p_items: itemPayload
+    });
+
+    if (error) {
+      console.error("RPC_CHECKOUT_ERROR:", error.message);
+      return { success: false };
     }
 
-    await supabase.from("items").update({ status: "sold" }).in("id", p.items.map((i) => i.id));
-    return true;
+    // Update Customer Info (Opsional, dilakukan setelah transaksi sukses)
+    if (p.customerPhone) {
+      supabase.from("customers").upsert(
+        { phone_number: p.customerPhone, tenant_id: tenantId, name: p.customerPhone, last_visit: new Date().toISOString() },
+        { onConflict: "tenant_id,phone_number" }
+      ).then();
+    }
+
+    return { success: true, txnId };
   } catch (err) {
-    console.error("DB_CATCH_ERROR:", err);
-    return false;
+    console.error("ATOMIC_CHECKOUT_CATCH:", err);
+    return { success: false };
   }
 }
 
@@ -236,10 +231,10 @@ export const useCartStore = create<CartStore>()(
           retryCount: 0,
         };
 
-        const success = await pushTxnToSupabase(pending);
-        if (success) {
+        const res = await pushTxnToSupabase(pending);
+        if (res.success) {
           set({ items: [], appliedDiscount: null });
-          return { success: true };
+          return { success: true, txnId: res.txnId };
         }
 
         set((state) => ({
@@ -265,13 +260,30 @@ export const useCartStore = create<CartStore>()(
 
       syncItemCache: async () => {
         try {
-          const { data } = await supabase.from("items").select("*").eq("status", "available").limit(5000);
-          if (data) set({ cachedItems: data as CachedItem[], cacheLastSync: Date.now() });
-        } catch { }
+          const { data, error } = await supabase
+            .from("items")
+            .select("*, vendors(commission_rate_percentage)")
+            .eq("status", "available")
+            .limit(5000);
+
+          if (error) {
+            console.error("Sync Cache Error:", error);
+          }
+
+          if (data) {
+            const mapped = data.map((d: any) => ({
+              ...d,
+              vendor_commission_rate: d.vendors?.commission_rate_percentage || 0
+            }));
+            set({ cachedItems: mapped as CachedItem[], cacheLastSync: Date.now() });
+          }
+        } catch (e) {
+          console.error("Sync Cache Catch:", e);
+        }
       },
     }),
     {
-      name: "wnp-cart-v3",
+      name: "wnp-cart-v4",
       partialize: (s) => ({
         items: s.items,
         eventSession: s.eventSession,

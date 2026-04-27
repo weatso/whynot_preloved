@@ -22,7 +22,7 @@ export default function StockPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!user || user.role !== "owner") router.replace("/login");
+    if (!user || (user.role !== "owner" && user.role !== "admin")) router.replace("/login");
     else fetchStock();
   }, [user, router]);
 
@@ -222,14 +222,27 @@ export default function StockPage() {
             <form onSubmit={handleUpdateItem} style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
               <input type="text" value={editingItem.name} onChange={e => setEditingItem({ ...editingItem, name: e.target.value })} placeholder="Nama Barang" className="wnp-input" />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-                <input type="number" value={editingItem.price} onChange={e => setEditingItem({ ...editingItem, price: e.target.value })} placeholder="Harga" className="wnp-input" />
-                <input type="text" value={editingItem.size || ""} onChange={e => setEditingItem({ ...editingItem, size: e.target.value })} placeholder="Ukuran" className="wnp-input" />
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.3rem" }}>Harga (Rp)</label>
+                  <input type="text" inputMode="numeric"
+                    value={editingItem.price ? Number(String(editingItem.price).replace(/\D/g, "")).toLocaleString("id-ID") : ""}
+                    onChange={e => {
+                      const raw = e.target.value.replace(/\D/g, "").replace(/^0+/, "");
+                      setEditingItem({ ...editingItem, price: raw });
+                    }}
+                    placeholder="Harga" className="wnp-input" />
+                  <input type="text" value={editingItem.size || ""} onChange={e => setEditingItem({ ...editingItem, size: e.target.value })} placeholder="Ukuran" className="wnp-input" style={{ marginTop: "0.5rem" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--color-brand-muted)", display: "block", marginBottom: "0.3rem" }}>Status Barang</label>
+                  <select value={editingItem.status} onChange={e => setEditingItem({ ...editingItem, status: e.target.value })} className="wnp-input">
+                    <option value="available">Tersedia (Available)</option>
+                    <option value="in_cart">Di Keranjang (In Cart)</option>
+                    <option value="sold">Terjual (Sold)</option>
+                    <option value="void">Dibatalkan (Void)</option>
+                  </select>
+                </div>
               </div>
-              <select value={editingItem.status} onChange={e => setEditingItem({ ...editingItem, status: e.target.value })} className="wnp-input">
-                <option value="available">Tersedia (Available)</option>
-                <option value="sold">Terjual (Sold)</option>
-                <option value="void">Dibatalkan (Void)</option>
-              </select>
               <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.25rem" }}>
                 <button type="submit" className="wnp-btn wnp-btn-primary" style={{ flex: 1 }}>Simpan</button>
                 <button type="button" onClick={() => { setEditingItem(null); inputRef.current?.focus(); }} className="wnp-btn wnp-btn-ghost">Batal</button>

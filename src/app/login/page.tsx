@@ -3,32 +3,42 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/authStore";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
   const { user, login } = useAuthStore();
   const [username, setUsername] = useState("");
-  const [pin, setPin] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const getRoleRoute = (role: string) => {
+    if (role === "superadmin") return "/superadmin";
+    if (role === "owner") return "/owner";
+    return "/kasir";
+  };
+
   useEffect(() => {
-    if (user) router.replace(user.role === "owner" ? "/owner" : "/kasir");
+    if (user) router.replace(getRoleRoute(user.role));
   }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !pin.trim()) { setError("Username dan PIN wajib diisi"); return; }
+    if (!username.trim() || !password.trim()) { 
+      setError("Username dan Password wajib diisi"); 
+      return; 
+    }
     setLoading(true);
     setError("");
-    const { success, error: err } = await login(username.trim(), pin.trim());
+    const result = await login(username.trim(), password.trim());
     setLoading(false);
-    if (success) {
-      const role = useAuthStore.getState().user?.role;
-      router.replace(role === "owner" ? "/owner" : "/kasir");
+    if (result.success && result.user) {
+      router.replace(getRoleRoute(result.user.role));
     } else {
-      setError(err || "Login gagal");
-      setPin("");
+      setError(result.error || "Login gagal");
+      setPassword("");
     }
   };
 
@@ -72,14 +82,43 @@ export default function LoginPage() {
           />
 
           <label style={{ color: "var(--color-brand-muted)", fontSize: "0.8rem", marginTop: "0.85rem", marginBottom: "0.4rem" }}>
-            PIN (4 Digit)
+            Password
           </label>
-          <input
-            type="password" value={pin} onChange={e => setPin(e.target.value)}
-            placeholder="****" className="wnp-input"
-            maxLength={4} disabled={loading}
-            style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.3em" }}
-          />
+          <div style={{ position: "relative" }}>
+            <input
+              type={showPassword ? "text" : "password"} 
+              value={password} onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••" className="wnp-input"
+              disabled={loading}
+              style={{ 
+                fontFamily: showPassword ? "inherit" : "var(--font-mono)", 
+                letterSpacing: showPassword ? "normal" : "0.1em",
+                paddingRight: "2.5rem",
+                width: "100%"
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              style={{
+                position: "absolute",
+                right: "0.75rem",
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "none",
+                border: "none",
+                color: "var(--color-brand-muted)",
+                cursor: "pointer",
+                padding: "0.25rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
 
           {error && (
             <p style={{ color: "var(--color-brand-red)", fontSize: "0.85rem", textAlign: "center", marginTop: "0.75rem" }}>

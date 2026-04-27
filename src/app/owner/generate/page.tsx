@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/lib/authStore";
@@ -23,7 +23,7 @@ export default function GenerateSKUPage() {
   const [qty, setQty] = useState("10");
 
   useEffect(() => {
-    if (!user || user.role !== "owner") router.replace("/login");
+    if (!user || (user.role !== "owner" && user.role !== "admin")) router.replace("/login");
     else fetchVendors();
   }, [user, router]);
 
@@ -37,7 +37,9 @@ export default function GenerateSKUPage() {
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !price || !vendorId) return alert("Nama, Harga, dan Vendor wajib diisi!");
+    const numericPrice = parseInt(price.replace(/\D/g, ""));
+    if (!name || !numericPrice || !vendorId) return alert("Nama, Harga, dan Vendor wajib diisi!");
+    if (!user?.tenant_id) return alert("Sesi tidak valid. Silakan login ulang.");
     
     setLoading(true);
     const vendor = vendors.find(v => v.id === vendorId);
@@ -50,10 +52,11 @@ export default function GenerateSKUPage() {
         const seqNumber = (currentCount + i).toString().padStart(4, '0');
         newItems.push({
           id: `${vendor.code}-${seqNumber}`,
+          tenant_id: user.tenant_id,
           vendor_id: vendor.id,
           name: name.trim(),
           category,
-          price: parseInt(price),
+          price: numericPrice,
           status: "available"
         });
       }
@@ -62,10 +65,11 @@ export default function GenerateSKUPage() {
       const seqNumber = (currentCount + 1).toString().padStart(4, '0');
       newItems.push({
         id: `${vendor.code}-${seqNumber}`,
+        tenant_id: user.tenant_id,
         vendor_id: vendor.id,
         name: name.trim(),
         category,
-        price: parseInt(price),
+        price: numericPrice,
         size: size || null,
         condition: condition || null,
         status: "available"
@@ -75,8 +79,10 @@ export default function GenerateSKUPage() {
 
     const { error } = await supabase.from("items").insert(newItems);
     
-    if (error) alert("Gagal menyimpan ke database.");
-    else {
+    if (error) {
+      console.error("SKU generation error:", error);
+      alert("Gagal menyimpan: " + error.message);
+    } else {
       await supabase.from("vendors").update({ item_count: currentCount }).eq("id", vendor.id);
       setGeneratedItems(newItems);
       setName(""); setPrice(""); setSize(""); setCondition("");
@@ -122,7 +128,12 @@ export default function GenerateSKUPage() {
                 </div>
                 <div>
                   <label style={{ fontSize: "0.85rem", color: "var(--color-brand-muted)" }}>Harga (Rp)</label>
-                  <input type="number" placeholder="50000" value={price} onChange={e => setPrice(e.target.value)} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", marginTop: "0.5rem" }} />
+                  <input type="text" inputMode="numeric" placeholder="50.000" value={price ? Number(price.replace(/\D/g, "")).toLocaleString("id-ID") : ""}
+                    onChange={e => {
+                      const raw = e.target.value.replace(/\D/g, "").replace(/^0+/, "");
+                      setPrice(raw);
+                    }}
+                    style={{ width: "100%", padding: "1rem", background: "var(--color-brand-surface)", color: "white", border: "1px solid var(--color-brand-border)", borderRadius: "8px", outline: "none", marginTop: "0.5rem" }} />
                 </div>
               </div>
 
@@ -176,9 +187,12 @@ export default function GenerateSKUPage() {
                 <div style={{ display: "grid", gridTemplateColumns: mode === "single" ? "1fr" : "1fr 1fr", gap: "0.5rem" }}>
                   {generatedItems.map(item => (
                     <div key={item.id} style={{ background: "white", color: "black", padding: "0.8rem", borderRadius: "4px", textAlign: "center", border: "1px solid #ccc" }}>
-                      <div style={{ fontSize: "0.7rem", fontWeight: "bold" }}>WNP PRELOVED</div>
-                      <div style={{ fontSize: "1.2rem", fontWeight: "900", fontFamily: "monospace", margin: "0.2rem 0" }}>{item.id}</div>
-                      <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "green" }}>Rp {item.price.toLocaleString("id-ID")}</div>
+                      <div style={{ fontSize: "0.65rem", fontWeight: "bold", letterSpacing: "0.05em" }}>WNP PRELOVED</div>
+                      <div style={{ display: "flex", justifyContent: "center", margin: "0.3rem 0" }}>
+                        <Barcode value={item.id} displayValue height={36} width={1.3} margin={0} fontSize={11} background="transparent" />
+                      </div>
+                      <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#16a34a" }}>Rp {item.price.toLocaleString("id-ID")}</div>
+                      {item.name && <div style={{ fontSize: "0.65rem", color: "#555", marginTop: "0.15rem" }}>{item.name}{item.size ? ` · ${item.size}` : ""}</div>}
                     </div>
                   ))}
                 </div>
@@ -191,11 +205,14 @@ export default function GenerateSKUPage() {
       {/* RENDER BARCODE KHUSUS UNTUK PRINTER */}
       <style dangerouslySetInnerHTML={{__html: `
         @media print {
-          html, body { margin: 0; padding: 0; background: white; -webkit-print-color-adjust: exact; }
-          .no-print { display: none !important; }
-          /* Menggunakan Flexbox agar label dapat menyesuaikan kertas yang digunakan (Stiker A4 atau Thermal Roll) */
-          #mass-print-area { display: flex !important; flex-wrap: wrap; justify-content: flex-start; gap: 10px; width: 100%; color: black; font-family: sans-serif; }
-          .print-label-item { page-break-inside: avoid; border: 1px dashed black; padding: 10px; text-align: center; min-width: 40mm; }
+          html, body { margin: 0; padding: 0; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          /* Hide EVERYTHING except the print area */
+          body > * { display: none !important; }
+          #mass-print-area { display: flex !important; }
+          /* Override: show nested content inside print area */
+          #mass-print-area * { display: initial !important; }
+          #mass-print-area { flex-wrap: wrap; justify-content: flex-start; gap: 10px; width: 100%; color: black; font-family: sans-serif; }
+          .print-label-item { display: inline-block !important; page-break-inside: avoid; border: 1px dashed #999; padding: 10px; text-align: center; min-width: 40mm; }
         }
       `}} />
 

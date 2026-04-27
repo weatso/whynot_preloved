@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import GlobalAnnouncement from "@/components/GlobalAnnouncement";
 
 export const metadata: Metadata = {
   title: "Why Not Preloved — POS System",
@@ -13,12 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="id" data-theme="dark" suppressHydrationWarning>
       <head>
-        {/* Prevent FOUC: read theme before first paint */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('wnp-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`,
-          }}
-        />
+
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -31,7 +27,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
       </head>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <GlobalAnnouncement />
+          {children}
+        </ThemeProvider>
         <script
           dangerouslySetInnerHTML={{
             __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js')}`,

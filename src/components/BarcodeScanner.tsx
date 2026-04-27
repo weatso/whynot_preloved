@@ -77,7 +77,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       style={{
         position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)",
         display: "flex", flexDirection: "column", alignItems: "center",
-        justifyContent: "center", zIndex: 200, padding: "1rem",
+        justifyContent: "center", zIndex: 9999, padding: "1rem",
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
@@ -132,14 +132,33 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         {/* Error */}
         {error && (
           <div style={{
-            padding: "1rem 1.25rem",
-            background: "rgba(239,68,68,0.1)",
+            padding: "1.25rem",
+            background: "rgba(239,68,68,0.08)",
             borderTop: "1px solid var(--color-brand-red)",
             color: "var(--color-brand-red)", fontSize: "0.85rem",
-            display: "flex", gap: "0.5rem", alignItems: "flex-start",
+            display: "flex", flexDirection: "column", gap: "0.75rem",
           }}>
-            <span style={{ flexShrink: 0 }}>⚠️</span>
-            <span>{error}</span>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
+              <span style={{ flexShrink: 0 }}>⚠️</span>
+              <span>{error}</span>
+            </div>
+            <div style={{ fontSize: "0.78rem", color: "var(--color-brand-muted)", lineHeight: 1.5 }}>
+              <strong>Cara mengaktifkan kamera:</strong><br />
+              • Chrome: Klik ikon 🔒 di address bar → Site settings → Camera → Allow<br />
+              • Safari: Settings → Safari → Camera → Allow<br />
+              • Firefox: Klik ikon kamera di address bar → Allow
+            </div>
+            <button
+              onClick={() => { setError(null); setIsLoading(true); window.location.reload(); }}
+              style={{
+                background: "var(--color-brand-accent)", color: "white",
+                border: "none", padding: "0.6rem 1rem", borderRadius: "8px",
+                cursor: "pointer", fontWeight: "bold", fontSize: "0.85rem",
+                alignSelf: "flex-start",
+              }}
+            >
+              🔄 Coba Lagi
+            </button>
           </div>
         )}
 

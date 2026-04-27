@@ -12,7 +12,7 @@ export default function AuditLogPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!user || user.role !== "owner") router.replace("/login");
+    if (!user || (user.role !== "owner" && user.role !== "admin")) router.replace("/login");
     else fetchLogs();
   }, [user, router]);
 
@@ -27,6 +27,7 @@ export default function AuditLogPage() {
 
   const actionBadgeClass = (action: string) => {
     if (action.includes("VOID")) return "wnp-badge-red";
+    if (action.includes("RETURN")) return "wnp-badge-yellow";
     if (action.includes("CLEAR")) return "wnp-badge-yellow";
     return "wnp-badge-gray";
   };

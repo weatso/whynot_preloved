@@ -1,20 +1,29 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { useAuthStore } from "./authStore";
 
-let _supabase: SupabaseClient | null = null;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-export function getSupabase(): SupabaseClient {
-  if (_supabase) return _supabase;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error("[WNP] Missing Supabase env vars");
-  _supabase = createClient(url, key, { realtime: { timeout: 10000 } });
-  return _supabase;
+if (!url || !key) {
+  console.warn("[WNP] Missing Supabase env vars");
 }
 
-export const supabase = new Proxy({} as SupabaseClient, {
-  get(_target, prop) {
-    return (getSupabase() as unknown as Record<string | symbol, unknown>)[prop];
+export const supabase = createClient(url, key, {
+  global: {
+    fetch: async (requestUrl, options = {}) => {
+      // Lazy load token to avoid circular dependency issues during module init
+      // Check window to prevent SSR crashes
+      const headers = new Headers(options?.headers);
+      if (typeof window !== "undefined") {
+        const token = useAuthStore.getState().token;
+        if (token) {
+          headers.set("Authorization", `Bearer ${token}`);
+        }
+      }
+      return fetch(requestUrl, { ...options, headers });
+    },
   },
+  realtime: { timeout: 10000 },
 });
 
 export type ItemStatus = "available" | "in_cart" | "sold" | "void";
@@ -97,4 +106,29 @@ export interface Transaction {
   void_by: string | null;
   void_at: string | null;
   created_at: string;
+}
+
+export interface VendorPayout {
+  id: string;
+  tenant_id: string;
+  vendor_id: string;
+  total_sales: number;
+  total_commission_deducted: number;
+  net_payout: number;
+  total_items: number;
+  paid_by: string | null;
+  paid_at: string;
+}
+
+export interface TransactionItem {
+  transaction_id: string;
+  item_id: string;
+  tenant_id: string;
+  price_at_sale: number;
+  discount_applied: number;
+  discount_code_used: string | null;
+  discount_bearer: string | null;
+  is_settled: boolean;
+  payout_id: string | null;
+  vendor_commission_rate: number;
 }

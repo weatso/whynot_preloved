@@ -10,12 +10,15 @@ const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("dark");
-
+  const [mounted, setMounted] = useState(false);
+ 
   useEffect(() => {
+    setMounted(true);
     const saved = localStorage.getItem("wnp-theme") as Theme | null;
-    const initial = saved || "dark";
-    setTheme(initial);
-    document.documentElement.setAttribute("data-theme", initial);
+    if (saved) {
+      setTheme(saved);
+      document.documentElement.setAttribute("data-theme", saved);
+    }
   }, []);
 
   const toggleTheme = useCallback(() => {
@@ -26,6 +29,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, []);
+
+  if (!mounted) {
+    return <ThemeContext.Provider value={{ theme: "dark", toggleTheme: () => {} }}>{children}</ThemeContext.Provider>;
+  }
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
