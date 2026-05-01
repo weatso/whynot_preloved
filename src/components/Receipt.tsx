@@ -59,7 +59,7 @@ export default function Receipt({
 
       {/* Header */}
       <div style={{ textAlign: "center", marginBottom: "15px" }}>
-        <h2 style={{ margin: "0 0 5px 0", fontSize: "16px", fontWeight: "bold" }}>{branding?.name || "WHY NOT PRELOVED"}</h2>
+        <h2 style={{ margin: "0 0 5px 0", fontSize: "16px", fontWeight: "bold" }}>{branding?.name || "PRELOVED SYSTEM"}</h2>
         <p style={{ margin: 0 }}>{branding?.name ? "Official Store Receipt" : "Premium Thrift & Vintage"}</p>
         <p style={{ margin: "5px 0" }}>--------------------------------</p>
       </div>

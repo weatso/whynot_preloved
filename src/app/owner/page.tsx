@@ -95,7 +95,7 @@ export default function OwnerDashboard() {
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 }}>
           <Image
             src="/logo.jpg"
-            alt="Why Not Preloved"
+            alt="Preloved System"
             width={36}
             height={36}
             style={{ borderRadius: "8px", objectFit: "cover" }}
@@ -103,7 +103,7 @@ export default function OwnerDashboard() {
           />
           <div>
             <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--color-brand-text)", lineHeight: 1.1 }}>
-              {tenantName || "Why Not Preloved"}
+              {tenantName || "Preloved System"}
             </div>
             <div style={{ fontSize: "0.68rem", color: "var(--color-brand-muted)", lineHeight: 1 }}>
               {user?.role === "admin" ? "Admin Dashboard" : "Owner Dashboard"}

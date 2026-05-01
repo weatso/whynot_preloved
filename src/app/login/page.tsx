@@ -55,7 +55,7 @@ export default function LoginPage() {
 
       <div style={{ textAlign: "center", marginBottom: "2rem" }}>
         <h1 style={{ fontSize: "clamp(1.5rem, 5vw, 2rem)", fontWeight: 700, color: "var(--color-brand-text)" }}>
-          Why Not Preloved
+          Preloved System
         </h1>
         <p style={{
           color: "var(--color-brand-muted)", fontSize: "0.8rem", marginTop: "0.4rem",

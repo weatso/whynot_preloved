@@ -378,7 +378,7 @@ export default function KasirPage() {
           )}
           <div>
             <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--color-brand-text)", lineHeight: 1.1 }}>
-              {tenantBranding?.name || "WNP POS"}
+              {tenantBranding?.name || "Preloved POS"}
             </div>
             <div style={{ fontSize: "0.65rem", color: "var(--color-brand-muted)", lineHeight: 1 }}>
               Kasir: {user.name}
@@ -465,7 +465,7 @@ export default function KasirPage() {
             <p style={{ color: "var(--color-brand-muted)", marginBottom: "2rem" }}>ID Transaksi: {lastTransaction.id.slice(0, 8).toUpperCase()}</p>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
               <button onClick={() => window.print()} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-accent)", color: "white", border: "none", borderRadius: "12px", fontSize: "1.1rem", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}>🖨️ Cetak Struk</button>
-              <button onClick={() => { const msg = `Halo! Terima kasih telah berbelanja di Why Not Preloved.%0A%0AID: ${lastTransaction.id.slice(0, 8).toUpperCase()}%0ATotal: Rp ${lastTransaction.total.toLocaleString("id-ID")}%0A%0ASystem powered by WEATSO.`; window.open(`https://wa.me/${lastTransaction.waNumber}?text=${msg}`, "_blank"); }} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-green-dark)", color: "white", border: "none", borderRadius: "12px", fontSize: "1.1rem", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}>📱 Kirim Struk Digital (WA)</button>
+              <button onClick={() => { const msg = `Halo! Terima kasih telah berbelanja di Preloved System.%0A%0AID: ${lastTransaction.id.slice(0, 8).toUpperCase()}%0ATotal: Rp ${lastTransaction.total.toLocaleString("id-ID")}%0A%0ASystem powered by WEATSO.`; window.open(`https://wa.me/${lastTransaction.waNumber}?text=${msg}`, "_blank"); }} style={{ width: "100%", padding: "1rem", background: "var(--color-brand-green-dark)", color: "white", border: "none", borderRadius: "12px", fontSize: "1.1rem", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}>📱 Kirim Struk Digital (WA)</button>
               <button onClick={() => setShowSuccessModal(false)} style={{ width: "100%", padding: "1rem", background: "transparent", color: "var(--color-brand-muted)", border: "1px solid var(--color-brand-border)", borderRadius: "12px", fontWeight: "bold", cursor: "pointer", marginTop: "1rem" }}>Selesai / Transaksi Baru</button>
             </div>
           </div>
@@ -473,7 +473,7 @@ export default function KasirPage() {
       )}
       {lastTransaction && (
         <Receipt 
-          id={lastTransaction.id} date={lastTransaction.date} cashier={lastTransaction.cashier} items={lastTransaction.items} subtotal={lastTransaction.subtotal} discount={lastTransaction.discount} total={lastTransaction.total} paymentMethod={lastTransaction.paymentMethod} branding={{ name: tenantBranding?.name || "WHY NOT PRELOVED", receiptFooter: tenantBranding?.receiptFooter || null }}
+          id={lastTransaction.id} date={lastTransaction.date} cashier={lastTransaction.cashier} items={lastTransaction.items} subtotal={lastTransaction.subtotal} discount={lastTransaction.discount} total={lastTransaction.total} paymentMethod={lastTransaction.paymentMethod} branding={{ name: tenantBranding?.name || "PRELOVED SYSTEM", receiptFooter: tenantBranding?.receiptFooter || null }}
         />
       )}
       {showScanner && (

@@ -112,7 +112,7 @@ export async function loginWithPassword(username: string, password: string) {
       logoUrl: (tenant as any).logo_url,
       receiptFooter: (tenant as any).receipt_footer,
     } : {
-      name: "Why Not Preloved",
+      name: "Preloved System",
       logoUrl: null,
       receiptFooter: null,
     }

@@ -4,10 +4,10 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import GlobalAnnouncement from "@/components/GlobalAnnouncement";
 
 export const metadata: Metadata = {
-  title: "Why Not Preloved — POS System",
-  description: "Sistem POS khusus event preloved Why Not Preloved.",
+  title: "Preloved System — POS System",
+  description: "Sistem POS khusus event preloved Preloved System.",
   manifest: "/manifest.json",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "WNP POS" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Preloved POS" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
